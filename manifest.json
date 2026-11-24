@@ -1,0 +1,30 @@
+{
+  "name": "OsiriWeb 3D — Visualizador TAC / RM",
+  "short_name": "OsiriWeb 3D",
+  "description": "Visualizador médico web de TAC e RM com reconstrução volumétrica 3D (WebGL2), MPR sincronizado e importador multifonte (DICOM, Vídeo, Imagens e PDF).",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050a12",
+  "theme_color": "#07111e",
+  "categories": [
+    "medical",
+    "education",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

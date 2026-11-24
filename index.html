@@ -1,0 +1,2736 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>OsiriWeb 3D — Visualizador TAC / RM</title>
+  <meta name="description" content="Visualizador médico web de TAC e RM com reconstrução volumétrica 3D WebGL2, MPR sincronizado e importador DICOM, Vídeo, Imagens e PDF." />
+  <meta name="theme-color" content="#07111e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="OsiriWeb 3D" />
+  <meta property="og:title" content="OsiriWeb 3D — Visualizador TAC / RM" />
+  <meta property="og:description" content="Reconstrução volumétrica 3D, MPR sincronizado e importador DICOM/Vídeo/Imagens/PDF para iPad, iPhone e Desktop." />
+  <meta property="og:image" content="assets/logo-banner.jpg" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+
+  <!-- Bibliotecas opcionais para DICOM e PDF (carregadas localmente em memória, zero envio de dados) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <style>
+    :root {
+      --bg-0: #050a12;
+      --bg-1: #0b1422;
+      --bg-2: #111e33;
+      --bg-3: #182944;
+      --border: #1e3354;
+      --text: #e6eef8;
+      --muted: #8ea5c4;
+      --cyan: #22d3ee;
+      --amber: #f59e0b;
+      --green: #34d399;
+      --blue: #38bdf8;
+      --red: #f87171;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; background: var(--bg-0); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+      font-size: 13px; user-select: none; -webkit-user-select: none;
+    }
+
+    /* Splash Screen */
+    #splash {
+      position: fixed; inset: 0; z-index: 9999;
+      background: radial-gradient(circle at center, #0e1e36 0%, #050a12 75%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px; transition: opacity 0.55s ease, visibility 0.55s ease;
+    }
+    #splash.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    #splash img {
+      width: min(560px, 90vw); height: auto; border-radius: 16px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.75), 0 0 40px rgba(34,211,238,0.18);
+      border: 1px solid rgba(34,211,238,0.22);
+    }
+    .splash-bar-wrap {
+      width: min(320px, 75vw); height: 5px; background: rgba(255,255,255,0.1);
+      border-radius: 99px; margin-top: 22px; overflow: hidden;
+    }
+    .splash-bar {
+      width: 35%; height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--amber));
+      border-radius: 99px; transition: width 0.35s ease;
+    }
+    .splash-status {
+      margin-top: 10px; color: var(--muted); font-size: 12px; letter-spacing: 0.4px;
+    }
+
+    /* Main Shell */
+    .app-shell {
+      display: flex; flex-direction: column;
+      width: 100%; height: 100%;
+      padding-top: var(--safe-top);
+      padding-bottom: var(--safe-bottom);
+      padding-left: var(--safe-left);
+      padding-right: var(--safe-right);
+    }
+
+    /* Top Header */
+    .topbar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+      padding: 6px 10px; background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      min-height: 48px; overflow-x: auto; scrollbar-width: none;
+    }
+    .topbar::-webkit-scrollbar { display: none; }
+
+    .brand {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer;
+      padding-right: 6px;
+    }
+    .brand img {
+      width: 32px; height: 32px; border-radius: 8px;
+      border: 1px solid rgba(34,211,238,0.4); object-fit: cover;
+    }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+    .brand-title { font-weight: 800; font-size: 14px; letter-spacing: 0.4px; }
+    .brand-title span { color: var(--amber); }
+    .brand-sub { font-size: 9px; color: var(--cyan); letter-spacing: 1px; text-transform: uppercase; }
+
+    .sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
+    select, button, input[type="number"] {
+      font-family: inherit; font-size: 12px; color: var(--text);
+    }
+    .select-study {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 10px; min-width: 165px; max-width: 220px; outline: none; cursor: pointer;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s, transform 0.08s;
+    }
+    .btn:hover { background: var(--bg-3); border-color: #2c4a76; }
+    .btn:active { transform: scale(0.97); }
+    .btn.active {
+      background: rgba(34,211,238,0.16); border-color: var(--cyan); color: #fff;
+      box-shadow: 0 0 0 1px rgba(34,211,238,0.25) inset;
+    }
+    .btn.primary {
+      background: linear-gradient(135deg, #0891b2, #0284c7);
+      border-color: #38bdf8; color: #fff; font-weight: 600;
+    }
+    .btn.primary:hover { filter: brightness(1.1); }
+    .btn.amber {
+      background: rgba(245,158,11,0.16); border-color: var(--amber); color: #fde68a;
+    }
+    .btn.danger {
+      background: rgba(248,113,113,0.14); border-color: rgba(248,113,113,0.45); color: #fecaca;
+    }
+
+    .seg-group {
+      display: inline-flex; background: var(--bg-0); padding: 2px;
+      border-radius: 9px; border: 1px solid var(--border); flex-shrink: 0;
+    }
+    .seg-group .btn { border: none; background: transparent; padding: 5px 9px; border-radius: 7px; }
+    .seg-group .btn.active { background: var(--bg-3); color: var(--cyan); box-shadow: none; }
+
+    .spacer { flex: 1; min-width: 6px; }
+
+    /* Workspace */
+    .workspace {
+      flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden;
+    }
+
+    /* Left Tool Strip */
+    .toolstrip {
+      width: 56px; background: var(--bg-1); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 8px 4px; overflow-y: auto; flex-shrink: 0;
+    }
+    .tool-btn {
+      width: 44px; height: 44px; border-radius: 10px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; background: transparent; border: 1px solid transparent;
+      color: var(--muted); cursor: pointer; font-size: 9px; padding: 2px;
+      transition: all 0.15s;
+    }
+    .tool-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.9; }
+    .tool-btn:hover { background: var(--bg-2); color: var(--text); }
+    .tool-btn.active {
+      background: rgba(34,211,238,0.16); border-color: var(--cyan); color: var(--cyan);
+    }
+
+    /* Viewport Grid */
+    .viewports-wrap {
+      flex: 1; min-width: 0; min-height: 0; background: #000;
+      display: grid; gap: 2px; padding: 2px; position: relative;
+    }
+    .viewports-wrap.layout-mpr3d {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+    }
+    .viewports-wrap.layout-2d,
+    .viewports-wrap.layout-3d {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+    }
+
+    .vp {
+      position: relative; background: #02050a; overflow: hidden;
+      border: 1px solid #15253d; border-radius: 4px;
+      touch-action: none;
+    }
+    .vp.hidden { display: none; }
+    .vp.selected { border-color: var(--cyan); }
+    .vp[data-plane="axial"] .vp-tag { color: var(--blue); border-color: rgba(56,189,248,0.45); }
+    .vp[data-plane="coronal"] .vp-tag { color: var(--green); border-color: rgba(52,211,153,0.45); }
+    .vp[data-plane="sagittal"] .vp-tag { color: var(--amber); border-color: rgba(245,158,11,0.45); }
+    .vp[data-plane="vr3d"] .vp-tag { color: var(--cyan); border-color: rgba(34,211,238,0.55); }
+
+    .vp canvas {
+      position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    }
+    .vp-overlay-canvas { pointer-events: none; }
+
+    .vp-hud {
+      position: absolute; pointer-events: none; font-size: 11px;
+      line-height: 1.35; text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+      color: #d6e4f5; font-variant-numeric: tabular-nums;
+    }
+    .vp-tl { top: 6px; left: 8px; }
+    .vp-tr { top: 6px; right: 8px; text-align: right; }
+    .vp-bl { bottom: 26px; left: 8px; }
+    .vp-br { bottom: 26px; right: 8px; text-align: right; }
+    .vp-tag {
+      display: inline-block; padding: 1px 6px; border-radius: 4px; font-weight: 700;
+      font-size: 10px; letter-spacing: 0.6px; background: rgba(5,10,18,0.78);
+      border: 1px solid var(--border); margin-bottom: 3px;
+    }
+
+    .vp-slider-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 24px;
+      background: linear-gradient(to top, rgba(5,10,18,0.9), transparent);
+      display: flex; align-items: center; padding: 0 10px; gap: 8px;
+    }
+    .vp-slider-bar input[type="range"] { flex: 1; height: 4px; accent-color: var(--cyan); }
+
+    .vp-orient {
+      position: absolute; pointer-events: none; font-size: 10px; font-weight: 700;
+      color: rgba(142,165,196,0.75); text-shadow: 0 1px 2px #000;
+    }
+    .orient-top { top: 4px; left: 50%; transform: translateX(-50%); }
+    .orient-bottom { bottom: 26px; left: 50%; transform: translateX(-50%); }
+    .orient-left { left: 5px; top: 50%; transform: translateY(-50%); }
+    .orient-right { right: 5px; top: 50%; transform: translateY(-50%); }
+
+    /* Right Inspector Panel */
+    .inspector {
+      width: 280px; background: var(--bg-1); border-left: 1px solid var(--border);
+      overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px;
+      flex-shrink: 0; transition: transform 0.25s ease;
+    }
+    .panel-card {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px;
+    }
+    .panel-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--cyan); margin: 0 0 8px 0; display: flex; align-items: center; justify-content: space-between;
+    }
+    .ctrl-row {
+      display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;
+    }
+    .ctrl-row:last-child { margin-bottom: 0; }
+    .ctrl-label {
+      display: flex; justify-content: space-between; font-size: 11px; color: var(--muted);
+    }
+    .ctrl-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .ctrl-row input[type="range"] { width: 100%; accent-color: var(--cyan); margin: 0; }
+    .chip-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
+    }
+    .chip-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .chip {
+      background: var(--bg-1); border: 1px solid var(--border); border-radius: 7px;
+      padding: 5px 6px; font-size: 11px; color: var(--text); cursor: pointer; text-align: center;
+      transition: all 0.15s;
+    }
+    .chip:hover { border-color: #35588c; }
+    .chip.active {
+      background: rgba(34,211,238,0.18); border-color: var(--cyan); color: #fff; font-weight: 600;
+    }
+    .chip.amber.active {
+      background: rgba(245,158,11,0.2); border-color: var(--amber); color: #fef3c7;
+    }
+
+    .cine-row { display: flex; align-items: center; gap: 6px; }
+    .toggle-inline {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; color: var(--text); margin-top: 4px;
+    }
+    .toggle-inline input { accent-color: var(--cyan); width: 16px; height: 16px; }
+
+    /* Modal System */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 5000;
+      background: rgba(2,6,14,0.82); backdrop-filter: blur(6px);
+      display: none; align-items: center; justify-content: center; padding: 14px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      width: min(780px, 96vw); max-height: 92vh; overflow: hidden;
+      background: var(--bg-1); border: 1px solid #26416b; border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+      display: flex; flex-direction: column;
+    }
+    .modal-header {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .modal-header h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .modal-body { padding: 14px 16px; overflow-y: auto; flex: 1; }
+    .modal-footer {
+      padding: 10px 16px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px; align-items: center;
+    }
+
+    .tab-bar {
+      display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 2px;
+    }
+    .tab-btn {
+      flex: 1; min-width: 115px; padding: 8px 10px; border-radius: 9px;
+      background: var(--bg-2); border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; font-weight: 600; font-size: 12px; text-align: center;
+    }
+    .tab-btn.active {
+      background: rgba(34,211,238,0.16); border-color: var(--cyan); color: #fff;
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    .dropzone {
+      border: 2px dashed #294670; border-radius: 12px; padding: 20px;
+      text-align: center; background: rgba(11,20,34,0.6); cursor: pointer;
+      transition: border-color 0.2s, background 0.2s; margin-bottom: 12px;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--cyan); background: rgba(34,211,238,0.08);
+    }
+    .dropzone p { margin: 4px 0; color: var(--muted); font-size: 12px; }
+    .dropzone strong { color: var(--text); font-size: 13px; }
+
+    .preview-box {
+      position: relative; background: #000; border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; display: flex; justify-content: center;
+      align-items: center; min-height: 200px; max-height: 300px; margin-bottom: 12px;
+    }
+    .preview-box canvas { max-width: 100%; max-height: 300px; object-fit: contain; cursor: crosshair; }
+
+    .form-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px; margin-bottom: 12px;
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; color: var(--muted); }
+    .field input, .field select {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 7px;
+      padding: 6px 8px; outline: none;
+    }
+
+    .progress-wrap {
+      display: none; margin-top: 10px; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    }
+    .progress-wrap.active { display: block; }
+    .progress-track {
+      width: 100%; height: 7px; background: var(--bg-0); border-radius: 99px; overflow: hidden; margin-top: 6px;
+    }
+    .progress-fill {
+      width: 0%; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--amber));
+      transition: width 0.12s;
+    }
+
+    .about-banner {
+      width: 100%; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 12px;
+    }
+    .disclaimer-box {
+      background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.4);
+      border-radius: 8px; padding: 10px; font-size: 12px; color: #fde68a; margin-top: 10px;
+    }
+
+    .toast {
+      position: fixed; bottom: calc(18px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
+      background: rgba(11,20,34,0.95); border: 1px solid var(--cyan); color: #fff;
+      padding: 8px 14px; border-radius: 99px; font-size: 12px; z-index: 6000;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    }
+    .toast.show { opacity: 1; }
+
+    /* Responsive iPad Portrait & iPhone */
+    #btnToggleInspector { display: none; }
+    @media (max-width: 960px) {
+      #btnToggleInspector { display: inline-flex; }
+      .inspector {
+        position: fixed; top: calc(48px + var(--safe-top)); right: 0; bottom: var(--safe-bottom);
+        z-index: 2000; width: min(300px, 86vw);
+        transform: translateX(105%); box-shadow: -12px 0 36px rgba(0,0,0,0.75);
+      }
+      .inspector.open { transform: translateX(0); }
+    }
+    @media (max-width: 600px) {
+      .brand-sub { display: none; }
+      .toolstrip { width: 48px; padding: 6px 2px; }
+      .tool-btn { width: 40px; height: 40px; font-size: 8px; }
+      .select-study { min-width: 125px; max-width: 155px; }
+      .vp-hud { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Splash Screen com Logótipo Oficial -->
+  <div id="splash">
+    <img src="assets/logo-banner.jpg" alt="OsiriWeb 3D — Visualizador TAC / RM" />
+    <div class="splash-bar-wrap"><div class="splash-bar" id="splashBar"></div></div>
+    <div class="splash-status" id="splashStatus">A inicializar motor volumétrico WebGL2...</div>
+  </div>
+
+  <div class="app-shell">
+    <!-- Barra Superior -->
+    <header class="topbar">
+      <div class="brand" id="btnAboutBrand" title="Sobre o OsiriWeb 3D">
+        <img src="assets/icon-192.png" alt="OsiriWeb 3D" />
+        <div class="brand-text">
+          <div class="brand-title">OsiriWeb <span>3D</span></div>
+          <div class="brand-sub">Visualizador TAC / RM</div>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <select id="studySelect" class="select-study" title="Selecionar Exame">
+        <option value="demo_brain">TAC Crânio + Angio (Demo)</option>
+        <option value="demo_thorax">TAC Tórax / Coluna (Demo)</option>
+      </select>
+
+      <div class="seg-group" id="layoutGroup">
+        <button class="btn" data-layout="2d" title="Vista 2D Única">2D</button>
+        <button class="btn active" data-layout="mpr3d" title="MPR Sincronizado + 3D">MPR+3D</button>
+        <button class="btn" data-layout="3d" title="3D Ecrã Inteiro">3D</button>
+      </div>
+
+      <select id="singlePlaneSelect" class="select-study" style="min-width:100px;max-width:115px;display:none;" title="Plano 2D">
+        <option value="axial">Axial</option>
+        <option value="coronal">Coronal</option>
+        <option value="sagittal">Sagital</option>
+      </select>
+
+      <button class="btn primary" id="btnOpenImport">+ Importar / Criar TAC</button>
+
+      <div class="spacer"></div>
+
+      <button class="btn" id="btnExportPNG" title="Exportar Captura PNG">PNG</button>
+      <button class="btn" id="btnAbout" title="Sobre / Atalhos">Sobre</button>
+      <button class="btn amber" id="btnToggleInspector">Controlos</button>
+    </header>
+
+    <!-- Área Principal -->
+    <div class="workspace">
+      <!-- Barra Lateral de Ferramentas -->
+      <aside class="toolstrip" id="toolstrip">
+        <button class="tool-btn active" data-tool="scroll" title="Navegar Cortes (Arrastar vertical)">
+          <svg viewBox="0 0 24 24"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/></svg>
+          <span>Cortes</span>
+        </button>
+        <button class="tool-btn" data-tool="wl" title="Window / Level (Arrastar H/V)">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
+          <span>W/L</span>
+        </button>
+        <button class="tool-btn" data-tool="pan" title="Zoom e Pan (Pinça ou roda)">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
+          <span>Zoom</span>
+        </button>
+        <button class="tool-btn" data-tool="crosshair" title="Mover Miras MPR">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>
+          <span>Miras</span>
+        </button>
+        <button class="tool-btn" data-tool="ruler" title="Régua (mm)">
+          <svg viewBox="0 0 24 24"><path d="M3 17L17 3l4 4L7 21H3v-4zM10 10l2 2M13 7l2 2M7 13l2 2"/></svg>
+          <span>Régua</span>
+        </button>
+        <button class="tool-btn" data-tool="roi" title="ROI Circular (Área mm² e HU)">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+          <span>ROI</span>
+        </button>
+        <button class="tool-btn" id="btnClearMeas" title="Limpar Medições">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+          <span>Limpar</span>
+        </button>
+        <button class="tool-btn" id="btnResetViews" title="Repor Vistas e Câmara">
+          <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          <span>Repor</span>
+        </button>
+      </aside>
+
+      <!-- Grelha de Viewports (MPR + 3D) -->
+      <main class="viewports-wrap layout-mpr3d" id="viewportsWrap">
+        <!-- Axial -->
+        <section class="vp selected" id="vp-axial" data-plane="axial">
+          <canvas id="canvas-axial"></canvas>
+          <canvas class="vp-overlay-canvas" id="overlay-axial"></canvas>
+          <div class="vp-orient orient-top">A</div>
+          <div class="vp-orient orient-bottom">P</div>
+          <div class="vp-orient orient-left">R</div>
+          <div class="vp-orient orient-right">L</div>
+          <div class="vp-hud vp-tl">
+            <div class="vp-tag">AXIAL</div>
+            <div id="hud-axial-info"></div>
+          </div>
+          <div class="vp-hud vp-tr" id="hud-axial-slice"></div>
+          <div class="vp-hud vp-bl" id="hud-axial-wl"></div>
+          <div class="vp-hud vp-br" id="hud-axial-hu"></div>
+          <div class="vp-slider-bar">
+            <input type="range" id="slider-axial" min="0" max="95" value="48" />
+          </div>
+        </section>
+
+        <!-- Coronal -->
+        <section class="vp" id="vp-coronal" data-plane="coronal">
+          <canvas id="canvas-coronal"></canvas>
+          <canvas class="vp-overlay-canvas" id="overlay-coronal"></canvas>
+          <div class="vp-orient orient-top">S</div>
+          <div class="vp-orient orient-bottom">I</div>
+          <div class="vp-orient orient-left">R</div>
+          <div class="vp-orient orient-right">L</div>
+          <div class="vp-hud vp-tl"><div class="vp-tag">CORONAL</div></div>
+          <div class="vp-hud vp-tr" id="hud-coronal-slice"></div>
+          <div class="vp-hud vp-br" id="hud-coronal-hu"></div>
+          <div class="vp-slider-bar">
+            <input type="range" id="slider-coronal" min="0" max="127" value="64" />
+          </div>
+        </section>
+
+        <!-- Sagital -->
+        <section class="vp" id="vp-sagittal" data-plane="sagittal">
+          <canvas id="canvas-sagittal"></canvas>
+          <canvas class="vp-overlay-canvas" id="overlay-sagittal"></canvas>
+          <div class="vp-orient orient-top">S</div>
+          <div class="vp-orient orient-bottom">I</div>
+          <div class="vp-orient orient-left">A</div>
+          <div class="vp-orient orient-right">P</div>
+          <div class="vp-hud vp-tl"><div class="vp-tag">SAGITAL</div></div>
+          <div class="vp-hud vp-tr" id="hud-sagittal-slice"></div>
+          <div class="vp-hud vp-br" id="hud-sagittal-hu"></div>
+          <div class="vp-slider-bar">
+            <input type="range" id="slider-sagittal" min="0" max="127" value="64" />
+          </div>
+        </section>
+
+        <!-- 3D Volume Rendering -->
+        <section class="vp" id="vp-vr3d" data-plane="vr3d">
+          <canvas id="canvas-vr3d"></canvas>
+          <div class="vp-hud vp-tl">
+            <div class="vp-tag" id="hud-3d-tag">3D · VR OSSO</div>
+            <div id="hud-3d-engine" style="color:var(--muted);font-size:10px;">WebGL2 Raymarching</div>
+          </div>
+          <div class="vp-hud vp-tr" id="hud-3d-angles"></div>
+          <div class="vp-hud vp-bl" style="bottom:8px;color:var(--muted);font-size:10px;">
+            Arrastar: Rodar · Pinça/Roda: Zoom · Duplo clique: Repor
+          </div>
+        </section>
+      </main>
+
+      <!-- Painel Lateral de Controlos -->
+      <aside class="inspector" id="inspector">
+        <!-- Controlo 3D -->
+        <div class="panel-card">
+          <div class="panel-title">
+            <span>Reconstrução 3D</span>
+            <button class="btn" id="btnAutoRotate" style="padding:2px 7px;font-size:10px;">Auto-Rodar</button>
+          </div>
+          <div class="chip-grid" id="vrModeGroup" style="margin-bottom:8px;">
+            <button class="chip active" data-vrmode="0">VR (Phong)</button>
+            <button class="chip" data-vrmode="1">MIP</button>
+            <button class="chip" data-vrmode="2">MinIP</button>
+            <button class="chip" data-vrmode="3">Iso-Sup.</button>
+          </div>
+          <div class="ctrl-label" style="margin-bottom:5px;"><span>Preset Clínico 3D</span></div>
+          <div class="chip-grid cols-3" id="vrPresetGroup" style="margin-bottom:10px;">
+            <button class="chip amber active" data-preset="bone">Osso</button>
+            <button class="chip amber" data-preset="angio">Angio</button>
+            <button class="chip amber" data-preset="soft">Moles</button>
+            <button class="chip amber" data-preset="lung">Pulmão</button>
+            <button class="chip amber" data-preset="pet">PET</button>
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Limiar / Threshold</span><b id="val-vrThresh">0.28</b></div>
+            <input type="range" id="vrThresh" min="0.02" max="0.90" step="0.01" value="0.28" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Opacidade / Ganho</span><b id="val-vrGain">1.40</b></div>
+            <input type="range" id="vrGain" min="0.20" max="3.50" step="0.05" value="1.40" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Espessura Z (Escala)</span><b id="val-vrZScale">1.00×</b></div>
+            <input type="range" id="vrZScale" min="0.30" max="2.50" step="0.05" value="1.00" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Corte 3D (Clip X / Y / Z)</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+              <input type="range" id="clipX" min="0.1" max="1.0" step="0.01" value="1.0" title="Clip X" />
+              <input type="range" id="clipY" min="0.1" max="1.0" step="0.01" value="1.0" title="Clip Y" />
+              <input type="range" id="clipZ" min="0.1" max="1.0" step="0.01" value="1.0" title="Clip Z" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Window / Level 2D -->
+        <div class="panel-card">
+          <div class="panel-title"><span>Janela 2D (Window / Level)</span></div>
+          <div class="chip-grid cols-3" id="wlPresetGroup" style="margin-bottom:8px;">
+            <button class="chip" data-ww="80" data-wl="40">Cérebro</button>
+            <button class="chip active" data-ww="2000" data-wl="400">Osso</button>
+            <button class="chip" data-ww="1500" data-wl="-600">Pulmão</button>
+            <button class="chip" data-ww="400" data-wl="50">Moles</button>
+            <button class="chip" data-ww="700" data-wl="200">Angio</button>
+            <button class="chip" id="btnAutoWL">Auto</button>
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Largura (WW)</span><b id="val-ww">2000</b></div>
+            <input type="range" id="sliderWW" min="10" max="4000" step="5" value="2000" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>Nível (WL)</span><b id="val-wl">400</b></div>
+            <input type="range" id="sliderWL" min="-1000" max="2000" step="5" value="400" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-label"><span>CLUT 2D (Mapa de Cor)</span></div>
+            <select id="clut2dSelect" class="select-study" style="width:100%;max-width:none;">
+              <option value="gray">Escala de Cinzentos</option>
+              <option value="inv">Invertido</option>
+              <option value="hot">Hot Iron / Fogo</option>
+              <option value="nih">Espectro / NIH</option>
+              <option value="pet">PET Clínico</option>
+            </select>
+          </div>
+          <label class="toggle-inline">
+            <span>Mostrar Miras MPR</span>
+            <input type="checkbox" id="chkCrosshairs" checked />
+          </label>
+        </div>
+
+        <!-- Cine & Metadados -->
+        <div class="panel-card">
+          <div class="panel-title"><span>Modo Cine & Estudo</span></div>
+          <div class="cine-row" style="margin-bottom:8px;">
+            <button class="btn primary" id="btnCinePlay" style="flex:1;">▶ Reproduzir Cine</button>
+            <input type="number" id="cineFps" min="1" max="30" value="10" style="width:52px;text-align:center;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:5px;" title="FPS" />
+            <span style="font-size:11px;color:var(--muted);">fps</span>
+          </div>
+          <div id="studyMetaBox" style="font-size:11px;color:var(--muted);line-height:1.5;"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Modal Importador Multifonte -->
+  <div class="modal-backdrop" id="importModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>📥 Importar / Criar Volume TAC ou RM</h2>
+        <button class="btn" id="btnCloseImport">✕ Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-bar" id="importTabs">
+          <button class="tab-btn active" data-tab="dicom">DICOM (.dcm)</button>
+          <button class="tab-btn" data-tab="video">Vídeo → TAC</button>
+          <button class="tab-btn" data-tab="images">Imagens</button>
+          <button class="tab-btn" data-tab="pdf">PDF → TAC</button>
+        </div>
+
+        <!-- Tab 1: DICOM -->
+        <div class="tab-pane active" id="tab-dicom">
+          <div class="dropzone" id="dz-dicom">
+            <strong>Selecionar ficheiros DICOM (.dcm) ou pasta completa</strong>
+            <p>Ordenação automática por SliceLocation / InstanceNumber · Processamento 100% local</p>
+            <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+              <button class="btn primary" type="button" id="btnPickDicomFiles">Escolher Ficheiros .dcm</button>
+              <button class="btn" type="button" id="btnPickDicomDir">Escolher Pasta DICOM</button>
+            </div>
+            <input type="file" id="inputDicomFiles" multiple accept=".dcm,.dicom,application/dicom,*/*" style="display:none" />
+            <input type="file" id="inputDicomDir" webkitdirectory directory multiple style="display:none" />
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Resolução de Reconstrução Máx.</label>
+              <select id="dicomMaxDim">
+                <option value="128">128×128 (Mais rápido · iPhone)</option>
+                <option value="192" selected>192×192 (Equilibrado · iPad)</option>
+                <option value="256">256×256 (Alta Definição)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Ficheiros carregados</label>
+              <input type="text" id="dicomFileCount" value="Nenhum selecionado" readonly />
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Vídeo -->
+        <div class="tab-pane" id="tab-video">
+          <div class="dropzone" id="dz-video">
+            <strong>Carregar Vídeo de Exame (.mp4, .mov, .webm)</strong>
+            <p>Arrasta ou seleciona uma gravação de ecrã/scroll de TAC ou RM</p>
+            <input type="file" id="inputVideoFile" accept="video/*" style="display:none" />
+          </div>
+          <div class="preview-box" id="videoPreviewBox" style="display:none;">
+            <canvas id="videoPreviewCanvas"></canvas>
+          </div>
+          <div class="form-grid">
+            <div class="field"><label>Cortes a extrair</label><input type="number" id="vidSlices" min="12" max="160" value="64" /></div>
+            <div class="field"><label>Espessura Z (mm)</label><input type="number" id="vidZMm" min="0.3" max="10" step="0.1" value="1.5" /></div>
+            <div class="field"><label>Recorte ROI X / Y (%)</label><div style="display:flex;gap:4px;"><input type="number" id="vidCropX" min="0" max="80" value="10" style="width:50%"/><input type="number" id="vidCropY" min="0" max="80" value="10" style="width:50%"/></div></div>
+            <div class="field"><label>Recorte ROI L / A (%)</label><div style="display:flex;gap:4px;"><input type="number" id="vidCropW" min="20" max="100" value="80" style="width:50%"/><input type="number" id="vidCropH" min="20" max="100" value="80" style="width:50%"/></div></div>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin:0;">Dica: ajusta a caixa verde de ROI (ou arrasta diretamente na pré-visualização) para remover texto/barras PACS antes de reconstruir em 3D.</p>
+        </div>
+
+        <!-- Tab 3: Sequência de Imagens -->
+        <div class="tab-pane" id="tab-images">
+          <div class="dropzone" id="dz-images">
+            <strong>Selecionar Sequência de Imagens (.png, .jpg, .webp)</strong>
+            <p>Ordenação natural automática por número de ficheiro (ex.: corte_1.png → corte_80.png)</p>
+            <input type="file" id="inputImageFiles" multiple accept="image/*" style="display:none" />
+          </div>
+          <div class="preview-box" id="imgPreviewBox" style="display:none;">
+            <canvas id="imgPreviewCanvas"></canvas>
+          </div>
+          <div class="form-grid">
+            <div class="field"><label>Imagens selecionadas</label><input type="text" id="imgFileCount" value="0" readonly /></div>
+            <div class="field"><label>Espessura Z (mm)</label><input type="number" id="imgZMm" min="0.3" max="10" step="0.1" value="1.5" /></div>
+            <div class="field"><label>Margem a remover (%)</label><input type="number" id="imgMargin" min="0" max="35" value="0" /></div>
+          </div>
+        </div>
+
+        <!-- Tab 4: PDF -->
+        <div class="tab-pane" id="tab-pdf">
+          <div class="dropzone" id="dz-pdf">
+            <strong>Carregar PDF Radiológico / Folha de Contacto (.pdf)</strong>
+            <p>Divide automaticamente páginas com grelha de cortes (Contact Sheet) num volume 3D</p>
+            <input type="file" id="inputPdfFile" accept="application/pdf,.pdf" style="display:none" />
+          </div>
+          <div class="preview-box" id="pdfPreviewBox" style="display:none;">
+            <canvas id="pdfPreviewCanvas"></canvas>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Grelha por Página (Col × Lin)</label>
+              <select id="pdfGridPreset">
+                <option value="1x1">1×1 (1 corte por página)</option>
+                <option value="2x2">2×2 (4 cortes/pág.)</option>
+                <option value="3x3" selected>3×3 (9 cortes/pág.)</option>
+                <option value="4x4">4×4 (16 cortes/pág.)</option>
+                <option value="4x5">4×5 (20 cortes/pág.)</option>
+              </select>
+            </div>
+            <div class="field"><label>Margem Exterior (%)</label><input type="number" id="pdfMargin" min="0" max="25" value="4" /></div>
+            <div class="field"><label>Espessura Z (mm)</label><input type="number" id="pdfZMm" min="0.3" max="10" step="0.1" value="2.0" /></div>
+            <div class="field"><label>Páginas detetadas</label><input type="text" id="pdfPageCount" value="0" readonly /></div>
+          </div>
+        </div>
+
+        <div class="progress-wrap" id="importProgress">
+          <div style="display:flex;justify-content:space-between;font-size:12px;">
+            <span id="importProgressLabel">A reconstruir volume 3D...</span>
+            <b id="importProgressPct">0%</b>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="importProgressFill"></div></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span style="font-size:11px;color:var(--muted);margin-right:auto;">🔒 Processamento 100% local no dispositivo</span>
+        <button class="btn" id="btnCancelImport">Cancelar</button>
+        <button class="btn primary" id="btnRunImport">Reconstruir Volume 3D</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Sobre -->
+  <div class="modal-backdrop" id="aboutModal">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <h2>Sobre o OsiriWeb 3D</h2>
+        <button class="btn" id="btnCloseAbout">✕ Fechar</button>
+      </div>
+      <div class="modal-body">
+        <img src="assets/logo-banner.jpg" alt="OsiriWeb 3D" class="about-banner" />
+        <p style="margin-top:0;line-height:1.55;">
+          <strong>OsiriWeb 3D</strong> é um visualizador web progressivo (PWA) inspirado no <em>OsiriX HD</em>,
+          otimizado para iPad, iPhone e Desktop. Suporta reconstrução volumétrica 3D em tempo real (WebGL2),
+          visualização MPR sincronizada, medições clínicas e criação de volumes 3D a partir de <strong>DICOM</strong>,
+          <strong>Vídeo</strong>, <strong>Sequência de Imagens</strong> e <strong>PDF</strong>.
+        </p>
+        <p style="font-size:12px;color:var(--muted);line-height:1.55;">
+          <strong>Gestos e Atalhos:</strong><br/>
+          • <strong>2D:</strong> Roda do rato ou arrastar (ferramenta Cortes) para percorrer fatias · Pinça para zoom · Arrastar em W/L para ajustar janela.<br/>
+          • <strong>3D:</strong> Arrastar com 1 dedo/rato para rodar · Pinça ou roda para zoom · Duplo clique/toque para repor câmara.<br/>
+          • <strong>iPad/iPhone:</strong> No Safari, toca em <em>Partilhar → Adicionar ao ecrã principal</em> para modo ecrã inteiro.
+        </p>
+        <div class="disclaimer-box">
+          ⚠️ <strong>Aviso Clínico:</strong> Ferramenta concebida para fins educacionais, demonstração e visualização auxiliar.
+          Não possui certificação médica (CE / FDA) e não deve ser utilizada para diagnóstico clínico primário.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn primary" id="btnOkAbout">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  // =========================================================
+  // 1. ESTADO GLOBAL DA APLICAÇÃO
+  // =========================================================
+  const state = {
+    studies: {},
+    currentStudyId: null,
+    volume: null, // { data: Int16Array, nx, ny, nz, spacing:[sx,sy,sz], minHU, maxHU, meta:{} }
+    layout: 'mpr3d', // '2d' | 'mpr3d' | '3d'
+    singlePlane: 'axial',
+    activePlane: 'axial',
+    tool: 'scroll', // 'scroll' | 'wl' | 'pan' | 'crosshair' | 'ruler' | 'roi'
+    slices: { axial: 48, coronal: 64, sagittal: 64 },
+    ww: 2000,
+    wl: 400,
+    clut2d: 'gray',
+    showCrosshairs: true,
+    view2d: {
+      axial:    { zoom: 1, panX: 0, panY: 0 },
+      coronal:  { zoom: 1, panX: 0, panY: 0 },
+      sagittal: { zoom: 1, panX: 0, panY: 0 },
+    },
+    measurements: { axial: [], coronal: [], sagittal: [] },
+    activeDraw: null,
+    cine: { playing: false, timer: null, fps: 10 },
+    vr: {
+      mode: 0, // 0=VR, 1=MIP, 2=MinIP, 3=ISO
+      preset: 'bone',
+      thresh: 0.28,
+      gain: 1.40,
+      zScale: 1.0,
+      clip: [1.0, 1.0, 1.0],
+      yaw: 0.55,
+      pitch: 0.25,
+      dist: 2.35,
+      interacting: false,
+      autoRotate: false,
+    },
+    clutLUT: new Uint8Array(256 * 3),
+    importState: {
+      activeTab: 'dicom',
+      dicomFiles: [],
+      videoFile: null,
+      videoEl: null,
+      videoCrop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
+      imageFiles: [],
+      pdfFile: null,
+      pdfDoc: null,
+    }
+  };
+
+  // Utilitários
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function showToast(msg, ms = 2600) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.remove('show'), ms);
+  }
+
+  // =========================================================
+  // 2. GERADORES DE VOLUMES 3D PROCEDURAIS (DEMO)
+  // =========================================================
+  function generateBrainCT() {
+    const nx = 128, ny = 128, nz = 96;
+    const data = new Int16Array(nx * ny * nz);
+    data.fill(-1000);
+
+    for (let z = 0; z < nz; z++) {
+      const zn = (z / (nz - 1)) * 2 - 1; // -1 (inferior/neck) to +1 (vertex)
+      for (let y = 0; y < ny; y++) {
+        const yn = (y / (ny - 1)) * 2 - 1; // -1 (anterior) to +1 (posterior)
+        for (let x = 0; x < nx; x++) {
+          const xn = (x / (nx - 1)) * 2 - 1;
+          const idx = z * nx * ny + y * nx + x;
+          let hu = -1000;
+
+          // Crânio principal (elipsoide superior)
+          const rSkull = Math.sqrt((xn / 0.64) ** 2 + ((yn - 0.04) / 0.78) ** 2 + ((zn - 0.16) / 0.78) ** 2);
+          // Pescoço / tecidos moles inferiores
+          const rNeck = Math.sqrt((xn / 0.36) ** 2 + ((yn - 0.12) / 0.38) ** 2);
+
+          if (rSkull < 1.07 && zn > -0.58) {
+            hu = 38; // couro cabeludo / partes moles
+          } else if (zn <= -0.45 && rNeck < 1.0) {
+            hu = 42;
+          }
+
+          // Calote craniana (osso cortical)
+          if (rSkull >= 0.87 && rSkull <= 1.0 && zn > -0.48) {
+            hu = 1050 + ((x * 7 + y * 13 + z * 11) % 90);
+          }
+
+          // Conteúdo intracraniano
+          if (rSkull < 0.87 && zn > -0.42) {
+            // Parênquima cerebral (substância branca/cinzenta com sulcos suaves)
+            const gyri = Math.sin(xn * 22) * Math.cos(yn * 22) * Math.sin(zn * 18);
+            hu = 36 + Math.round(gyri * 7);
+
+            // Foice inter-hemisférica
+            if (Math.abs(xn) < 0.018 && zn > 0.05) hu = 55;
+
+            // Ventrículos laterais (LCR ~6 HU)
+            const vLeft = Math.sqrt(((xn + 0.13) / 0.11) ** 2 + ((yn - 0.04) / 0.28) ** 2 + ((zn - 0.24) / 0.14) ** 2);
+            const vRight = Math.sqrt(((xn - 0.13) / 0.11) ** 2 + ((yn - 0.04) / 0.28) ** 2 + ((zn - 0.24) / 0.14) ** 2);
+            const vThird = Math.sqrt((xn / 0.04) ** 2 + ((yn - 0.05) / 0.12) ** 2 + ((zn - 0.12) / 0.10) ** 2);
+            if (vLeft < 1.0 || vRight < 1.0 || vThird < 1.0) hu = 6;
+
+            // Polígono de Willis e artérias cerebrais médias (Angio com contraste ~360 HU)
+            const circleR = Math.abs(Math.sqrt(xn * xn + (yn + 0.08) ** 2) - 0.16);
+            if (circleR < 0.028 && Math.abs(zn + 0.04) < 0.032) hu = 380;
+            // Ramos ACM esquerdo e direito
+            const mcaDist = Math.abs((yn + 0.08) - Math.abs(xn) * 0.25);
+            if (mcaDist < 0.025 && Math.abs(xn) > 0.14 && Math.abs(xn) < 0.56 && Math.abs(zn + 0.02 - Math.abs(xn) * 0.22) < 0.03) {
+              hu = 350;
+            }
+            // Carótidas internas ascendentes
+            if (zn < -0.02 && zn > -0.92) {
+              const carL = Math.hypot(xn + 0.14, yn + 0.06);
+              const carR = Math.hypot(xn - 0.14, yn + 0.06);
+              if (carL < 0.032 || carR < 0.032) hu = 370;
+            }
+
+            // Pequena lesão focal calcificada frontal direita (útil para medir com Régua/ROI)
+            const dLesion = Math.hypot(xn - 0.26, yn + 0.26, zn - 0.22);
+            if (dLesion < 0.085) hu = 680;
+          }
+
+          // Órbitas oculares e globos
+          if (zn > -0.34 && zn < -0.08 && yn < -0.35 && yn > -0.76) {
+            const orbL = Math.hypot(xn + 0.24, zn + 0.20, yn + 0.56);
+            const orbR = Math.hypot(xn - 0.24, zn + 0.20, yn + 0.56);
+            if (orbL < 0.14 || orbR < 0.14) hu = 12;
+            else if (orbL < 0.18 || orbR < 0.18) hu = 950;
+          }
+
+          // Seios perinasais (ar -950 HU)
+          if (zn > -0.45 && zn < -0.15 && yn < -0.38 && yn > -0.68 && Math.abs(xn) < 0.14) {
+            hu = -940;
+          }
+          // Seios maxilares
+          if (zn > -0.56 && zn < -0.34 && yn < -0.30 && yn > -0.58) {
+            if (Math.hypot(xn + 0.22, yn + 0.44) < 0.11 || Math.hypot(xn - 0.22, yn + 0.44) < 0.11) {
+              hu = -920;
+            }
+          }
+
+          // Mandíbula simplificada
+          if (zn < -0.44 && zn > -0.78 && yn < 0.05) {
+            const jawR = Math.hypot(xn / 0.46, (yn + 0.15) / 0.52);
+            if (jawR > 0.84 && jawR < 1.0 && yn < -0.05) hu = 1080;
+          }
+
+          // Coluna cervical C1-C4
+          if (zn < -0.42) {
+            const vBody = Math.hypot(xn / 0.14, (yn - 0.12) / 0.13);
+            const disc = Math.sin((zn + 0.42) * 26);
+            if (vBody < 1.0) {
+              hu = disc > -0.65 ? 880 : 65;
+            }
+            // Arco posterior + processo espinhoso
+            const canal = Math.hypot(xn / 0.10, (yn - 0.28) / 0.09);
+            const arch = Math.hypot(xn / 0.17, (yn - 0.28) / 0.16);
+            if (arch < 1.0 && canal >= 0.85 && disc > -0.4) hu = 840;
+            if (Math.abs(xn) < 0.035 && yn > 0.38 && yn < 0.52 && disc > -0.2) hu = 820;
+          }
+
+          data[idx] = hu;
+        }
+      }
+    }
+
+    return {
+      id: 'demo_brain',
+      name: 'TAC Crânio + Angio (Demo)',
+      data, nx, ny, nz,
+      spacing: [1.8, 1.8, 2.0],
+      minHU: -1000, maxHU: 1400,
+      defaultWW: 2000, defaultWL: 400, defaultPreset: 'bone',
+      meta: {
+        patient: 'PACIENTE DEMO 01',
+        modality: 'CT · ANGIO CRÂNIO',
+        studyDate: '2026-11-24',
+        institution: 'OsiriWeb 3D Lab'
+      }
+    };
+  }
+
+  function generateThoraxCT() {
+    const nx = 128, ny = 128, nz = 96;
+    const data = new Int16Array(nx * ny * nz);
+    data.fill(-1000);
+
+    for (let z = 0; z < nz; z++) {
+      const zn = (z / (nz - 1)) * 2 - 1;
+      for (let y = 0; y < ny; y++) {
+        const yn = (y / (ny - 1)) * 2 - 1;
+        for (let x = 0; x < nx; x++) {
+          const xn = (x / (nx - 1)) * 2 - 1;
+          const idx = z * nx * ny + y * nx + x;
+          let hu = -1000;
+
+          // Tronco elíptico
+          const torso = Math.sqrt((xn / 0.86) ** 2 + (yn / 0.62) ** 2);
+          if (torso < 1.0) {
+            hu = 45; // parede torácica muscular
+            if (torso > 0.90) hu = -75; // gordura subcutânea
+          }
+
+          // Pulmões (esquerdo e direito)
+          const lungScale = 1.0 - Math.max(0, zn - 0.55) * 1.1;
+          if (zn > -0.78 && zn < 0.88 && lungScale > 0.25) {
+            const lungR = Math.sqrt(((xn + 0.34) / (0.34 * lungScale)) ** 2 + ((yn - 0.02) / (0.42 * lungScale)) ** 2);
+            const lungL = Math.sqrt(((xn - 0.34) / (0.34 * lungScale)) ** 2 + ((yn - 0.02) / (0.42 * lungScale)) ** 2);
+            if (lungR < 1.0 || lungL < 1.0) {
+              const vessels = Math.sin(xn * 28) * Math.sin(yn * 28) * Math.cos(zn * 22);
+              hu = -780 + Math.round(vessels * 45);
+            }
+          }
+
+          // Coração e grandes vasos (contraste ~260 HU)
+          const heart = Math.sqrt(((xn - 0.11) / 0.27) ** 2 + ((yn + 0.14) / 0.25) ** 2 + ((zn + 0.20) / 0.36) ** 2);
+          if (heart < 1.0) hu = 240;
+
+          // Aorta descendente e arco aórtico
+          if (zn < 0.45) {
+            const aortaDesc = Math.hypot(xn - 0.10, yn - 0.20);
+            if (aortaDesc < 0.075) hu = 310;
+          }
+          if (zn >= 0.30 && zn <= 0.60) {
+            const arch = Math.hypot(xn - 0.05, Math.hypot(yn - 0.02, (zn - 0.35) * 1.4) - 0.18);
+            if (arch < 0.07) hu = 310;
+          }
+
+          // Traqueia e brônquios principais (ar -960 HU)
+          if (zn > 0.22) {
+            if (Math.hypot(xn, yn - 0.04) < 0.065) hu = -960;
+          } else if (zn > -0.08) {
+            const brSep = (0.22 - zn) * 0.72;
+            if (Math.hypot(xn + brSep, yn - 0.04) < 0.048 || Math.hypot(xn - brSep, yn - 0.04) < 0.048) hu = -950;
+          }
+
+          // Nódulo pulmonar sólido no lobo superior direito (útil para medição clínica)
+          if (Math.hypot(xn + 0.38, yn + 0.06, zn - 0.34) < 0.068) hu = 70;
+
+          // Coluna torácica (vértebras + discos)
+          const spineBody = Math.hypot(xn / 0.13, (yn - 0.32) / 0.12);
+          const vWave = Math.sin(zn * 26);
+          if (spineBody < 1.0) hu = vWave > -0.68 ? 920 : 60;
+          const spArch = Math.hypot(xn / 0.16, (yn - 0.46) / 0.13);
+          const spCanal = Math.hypot(xn / 0.085, (yn - 0.45) / 0.08);
+          if (spArch < 1.0 && spCanal > 0.85 && vWave > -0.45) hu = 880;
+          if (Math.abs(xn) < 0.032 && yn > 0.52 && yn < 0.65 && vWave > -0.2) hu = 860;
+
+          // Esterno anterior
+          if (Math.abs(xn) < 0.095 && yn < -0.45 && yn > -0.54 && zn > -0.35 && zn < 0.68) hu = 940;
+
+          // Costelas curvas (8 pares)
+          if (torso > 0.77 && torso < 0.87 && yn < 0.46) {
+            const ribPhase = Math.sin((zn + yn * 0.22) * 26);
+            if (ribPhase > 0.48 && Math.abs(xn) > 0.11) hu = 960;
+          }
+
+          data[idx] = hu;
+        }
+      }
+    }
+
+    return {
+      id: 'demo_thorax',
+      name: 'TAC Tórax / Coluna (Demo)',
+      data, nx, ny, nz,
+      spacing: [2.5, 2.5, 2.5],
+      minHU: -1000, maxHU: 1300,
+      defaultWW: 1500, defaultWL: -600, defaultPreset: 'bone',
+      meta: {
+        patient: 'PACIENTE DEMO 02',
+        modality: 'CT · TÓRAX / COLUNA',
+        studyDate: '2026-11-24',
+        institution: 'OsiriWeb 3D Lab'
+      }
+    };
+  }
+
+  // =========================================================
+  // 3. CLUTs 2D & MOTOR DE RENDERIZAÇÃO MPR
+  // =========================================================
+  function buildCLUT(name) {
+    const lut = state.clutLUT;
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      let r = i, g = i, b = i;
+      if (name === 'inv') {
+        r = g = b = 255 - i;
+      } else if (name === 'hot') {
+        r = Math.min(255, Math.round(t * 3 * 255));
+        g = Math.min(255, Math.max(0, Math.round((t * 3 - 1) * 255)));
+        b = Math.min(255, Math.max(0, Math.round((t * 3 - 2) * 255)));
+      } else if (name === 'nih') {
+        r = Math.round(255 * clamp(Math.sin(t * Math.PI * 1.5 - 0.5) * 0.8 + 0.4, 0, 1));
+        g = Math.round(255 * clamp(Math.sin(t * Math.PI * 1.2), 0, 1));
+        b = Math.round(255 * clamp(Math.cos(t * Math.PI * 1.3), 0, 1));
+      } else if (name === 'pet') {
+        if (t < 0.25) { r = 0; g = Math.round(t * 4 * 120); b = Math.round(t * 4 * 255); }
+        else if (t < 0.5) { r = Math.round((t - 0.25) * 4 * 220); g = 120 + Math.round((t - 0.25) * 4 * 135); b = 255 - Math.round((t - 0.25) * 4 * 255); }
+        else if (t < 0.8) { r = 220 + Math.round((t - 0.5) / 0.3 * 35); g = 255 - Math.round((t - 0.5) / 0.3 * 165); b = 0; }
+        else { r = 255; g = 90 + Math.round((t - 0.8) / 0.2 * 165); b = Math.round((t - 0.8) / 0.2 * 255); }
+      }
+      lut[i * 3] = r; lut[i * 3 + 1] = g; lut[i * 3 + 2] = b;
+    }
+  }
+
+  function getPlaneDims(plane) {
+    const v = state.volume;
+    if (!v) return { w: 1, h: 1, d: 1, spX: 1, spY: 1 };
+    if (plane === 'axial')    return { w: v.nx, h: v.ny, d: v.nz, spX: v.spacing[0], spY: v.spacing[1] };
+    if (plane === 'coronal')  return { w: v.nx, h: v.nz, d: v.ny, spX: v.spacing[0], spY: v.spacing[2] * state.vr.zScale };
+    return                           { w: v.ny, h: v.nz, d: v.nx, spX: v.spacing[1], spY: v.spacing[2] * state.vr.zScale };
+  }
+
+  function getViewportTransform(plane, cw, ch) {
+    const dim = getPlaneDims(plane);
+    const physW = dim.w * dim.spX;
+    const physH = dim.h * dim.spY;
+    const baseScale = Math.min(cw / physW, ch / physH) * 0.94;
+    const vw = state.view2d[plane];
+    const drawW = physW * baseScale * vw.zoom;
+    const drawH = physH * baseScale * vw.zoom;
+    const ox = (cw - drawW) / 2 + vw.panX;
+    const oy = (ch - drawH) / 2 + vw.panY;
+    return { ox, oy, drawW, drawH, dim };
+  }
+
+  function screenToVoxel2D(plane, sx, sy, cw, ch) {
+    const tf = getViewportTransform(plane, cw, ch);
+    const u = (sx - tf.ox) / tf.drawW;
+    const v = (sy - tf.oy) / tf.drawH;
+    return { u, v, px: u * tf.dim.w, py: v * tf.dim.h, tf };
+  }
+
+  function samplePlaneHU(plane, u, v) {
+    const vol = state.volume;
+    if (!vol || u < 0 || u > 1 || v < 0 || v > 1) return null;
+    const { nx, ny, nz, data } = vol;
+    let ix, iy, iz;
+    if (plane === 'axial') {
+      ix = clamp(Math.floor(u * nx), 0, nx - 1);
+      iy = clamp(Math.floor(v * ny), 0, ny - 1);
+      iz = clamp(state.slices.axial, 0, nz - 1);
+    } else if (plane === 'coronal') {
+      ix = clamp(Math.floor(u * nx), 0, nx - 1);
+      iy = clamp(state.slices.coronal, 0, ny - 1);
+      iz = clamp(nz - 1 - Math.floor(v * nz), 0, nz - 1);
+    } else {
+      ix = clamp(state.slices.sagittal, 0, nx - 1);
+      iy = clamp(Math.floor(u * ny), 0, ny - 1);
+      iz = clamp(nz - 1 - Math.floor(v * nz), 0, nz - 1);
+    }
+    return data[iz * nx * ny + iy * nx + ix];
+  }
+
+  const offscreenCache = {
+    axial: document.createElement('canvas'),
+    coronal: document.createElement('canvas'),
+    sagittal: document.createElement('canvas')
+  };
+
+  function render2DPlane(plane) {
+    const vp = $('vp-' + plane);
+    if (!vp || vp.classList.contains('hidden') || !state.volume) return;
+    const canvas = $('canvas-' + plane);
+    const overlay = $('overlay-' + plane);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = Math.max(1, Math.floor(vp.clientWidth * dpr));
+    const ch = Math.max(1, Math.floor(vp.clientHeight * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw; canvas.height = ch;
+      overlay.width = cw; overlay.height = ch;
+    }
+
+    const vol = state.volume;
+    const { nx, ny, nz, data } = vol;
+    const dim = getPlaneDims(plane);
+    const off = offscreenCache[plane];
+    if (off.width !== dim.w || off.height !== dim.h) {
+      off.width = dim.w; off.height = dim.h;
+    }
+    const octx = off.getContext('2d');
+    const imgData = octx.createImageData(dim.w, dim.h);
+    const px = imgData.data;
+
+    const minV = state.wl - state.ww * 0.5;
+    const invWW = 255 / Math.max(1, state.ww);
+    const lut = state.clutLUT;
+    const slice = clamp(state.slices[plane], 0, dim.d - 1);
+
+    let p = 0;
+    if (plane === 'axial') {
+      const zOff = slice * nx * ny;
+      for (let y = 0; y < ny; y++) {
+        const rowOff = zOff + y * nx;
+        for (let x = 0; x < nx; x++) {
+          const g = clamp(Math.round((data[rowOff + x] - minV) * invWW), 0, 255) * 3;
+          px[p++] = lut[g]; px[p++] = lut[g + 1]; px[p++] = lut[g + 2]; px[p++] = 255;
+        }
+      }
+    } else if (plane === 'coronal') {
+      const yOff = slice * nx;
+      for (let row = 0; row < nz; row++) {
+        const zOff = (nz - 1 - row) * nx * ny + yOff;
+        for (let x = 0; x < nx; x++) {
+          const g = clamp(Math.round((data[zOff + x] - minV) * invWW), 0, 255) * 3;
+          px[p++] = lut[g]; px[p++] = lut[g + 1]; px[p++] = lut[g + 2]; px[p++] = 255;
+        }
+      }
+    } else {
+      for (let row = 0; row < nz; row++) {
+        const zOff = (nz - 1 - row) * nx * ny;
+        for (let y = 0; y < ny; y++) {
+          const g = clamp(Math.round((data[zOff + y * nx + slice] - minV) * invWW), 0, 255) * 3;
+          px[p++] = lut[g]; px[p++] = lut[g + 1]; px[p++] = lut[g + 2]; px[p++] = 255;
+        }
+      }
+    }
+    octx.putImageData(imgData, 0, 0);
+
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#02050a';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.imageSmoothingEnabled = true;
+    const tf = getViewportTransform(plane, cw, ch);
+    ctx.drawImage(off, tf.ox, tf.oy, tf.drawW, tf.drawH);
+
+    // Overlay (Miras MPR + Medições)
+    const ov = overlay.getContext('2d');
+    ov.clearRect(0, 0, cw, ch);
+
+    if (state.showCrosshairs) {
+      let cxU, cyV, cH, cV;
+      if (plane === 'axial') {
+        cxU = (state.slices.sagittal + 0.5) / nx;
+        cyV = (state.slices.coronal + 0.5) / ny;
+        cV = 'rgba(245,158,11,0.75)'; // sagital
+        cH = 'rgba(52,211,153,0.75)'; // coronal
+      } else if (plane === 'coronal') {
+        cxU = (state.slices.sagittal + 0.5) / nx;
+        cyV = (nz - 1 - state.slices.axial + 0.5) / nz;
+        cV = 'rgba(245,158,11,0.75)';
+        cH = 'rgba(56,189,248,0.75)';
+      } else {
+        cxU = (state.slices.coronal + 0.5) / ny;
+        cyV = (nz - 1 - state.slices.axial + 0.5) / nz;
+        cV = 'rgba(52,211,153,0.75)';
+        cH = 'rgba(56,189,248,0.75)';
+      }
+      const xPos = tf.ox + cxU * tf.drawW;
+      const yPos = tf.oy + cyV * tf.drawH;
+      const gap = 10 * dpr;
+      ov.lineWidth = 1.2 * dpr;
+      ov.setLineDash([5 * dpr, 4 * dpr]);
+      ov.strokeStyle = cV;
+      ov.beginPath(); ov.moveTo(xPos, tf.oy); ov.lineTo(xPos, yPos - gap);
+      ov.moveTo(xPos, yPos + gap); ov.lineTo(xPos, tf.oy + tf.drawH); ov.stroke();
+      ov.strokeStyle = cH;
+      ov.beginPath(); ov.moveTo(tf.ox, yPos); ov.lineTo(xPos - gap, yPos);
+      ov.moveTo(xPos + gap, yPos); ov.lineTo(tf.ox + tf.drawW, yPos); ov.stroke();
+      ov.setLineDash([]);
+    }
+
+    // Desenhar medições do corte atual
+    const list = state.measurements[plane].filter(m => m.slice === slice);
+    const drawList = [...list];
+    if (state.activeDraw && state.activeDraw.plane === plane) drawList.push(state.activeDraw);
+
+    ov.font = `600 ${11 * dpr}px -apple-system, sans-serif`;
+    for (const m of drawList) {
+      const x1 = tf.ox + m.u1 * tf.drawW, y1 = tf.oy + m.v1 * tf.drawH;
+      const x2 = tf.ox + m.u2 * tf.drawW, y2 = tf.oy + m.v2 * tf.drawH;
+      if (m.type === 'ruler') {
+        ov.strokeStyle = '#22d3ee';
+        ov.lineWidth = 2 * dpr;
+        ov.beginPath(); ov.moveTo(x1, y1); ov.lineTo(x2, y2); ov.stroke();
+        ov.fillStyle = '#22d3ee';
+        ov.beginPath(); ov.arc(x1, y1, 3.5 * dpr, 0, Math.PI * 2); ov.arc(x2, y2, 3.5 * dpr, 0, Math.PI * 2); ov.fill();
+
+        const dxMm = (m.u2 - m.u1) * dim.w * dim.spX;
+        const dyMm = (m.v2 - m.v1) * dim.h * dim.spY;
+        const distMm = Math.hypot(dxMm, dyMm);
+        drawBadge(ov, `${distMm.toFixed(1)} mm`, (x1 + x2) / 2, (y1 + y2) / 2 - 12 * dpr, dpr, '#22d3ee');
+      } else if (m.type === 'roi') {
+        const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+        const rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+        ov.strokeStyle = '#f59e0b';
+        ov.fillStyle = 'rgba(245,158,11,0.14)';
+        ov.lineWidth = 1.8 * dpr;
+        ov.beginPath(); ov.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
+        ov.fill(); ov.stroke();
+
+        const stats = computeROIStats(plane, m, dim);
+        const label = `${stats.areaMm2.toFixed(0)} mm² · ${stats.mean.toFixed(0)}±${stats.sd.toFixed(0)} HU`;
+        drawBadge(ov, label, cx, cy - ry - 12 * dpr, dpr, '#f59e0b');
+      }
+    }
+
+    // Atualizar HUDs
+    $(`hud-${plane}-slice`).textContent = `Corte ${slice + 1} / ${dim.d}`;
+    if (plane === 'axial') {
+      $('hud-axial-info').textContent = `${vol.meta.patient || 'ESTUDO'} · ${vol.meta.modality || 'CT'}`;
+      $('hud-axial-wl').textContent = `WW ${Math.round(state.ww)} · WL ${Math.round(state.wl)} · ${Math.round(state.view2d.axial.zoom * 100)}%`;
+    }
+    $(`slider-${plane}`).max = dim.d - 1;
+    $(`slider-${plane}`).value = slice;
+  }
+
+  function drawBadge(ctx, text, x, y, dpr, borderColor) {
+    const padX = 6 * dpr, padY = 3 * dpr;
+    const tw = ctx.measureText(text).width;
+    const bx = x - tw / 2 - padX;
+    const by = y - 10 * dpr - padY;
+    const bw = tw + padX * 2;
+    const bh = 16 * dpr + padY * 2;
+    ctx.fillStyle = 'rgba(5,10,18,0.88)';
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, 4 * dpr) : ctx.rect(bx, by, bw, bh);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(text, bx + padX, by + bh - 5 * dpr);
+  }
+
+  function computeROIStats(plane, m, dim) {
+    const uMin = Math.min(m.u1, m.u2), uMax = Math.max(m.u1, m.u2);
+    const vMin = Math.min(m.v1, m.v2), vMax = Math.max(m.v1, m.v2);
+    const cu = (uMin + uMax) / 2, cv = (vMin + vMax) / 2;
+    const ru = Math.max(0.005, (uMax - uMin) / 2);
+    const rv = Math.max(0.005, (vMax - vMin) / 2);
+    const rxMm = ru * dim.w * dim.spX;
+    const ryMm = rv * dim.h * dim.spY;
+    const areaMm2 = Math.PI * rxMm * ryMm;
+
+    let sum = 0, sum2 = 0, count = 0;
+    const stepU = 1 / dim.w, stepV = 1 / dim.h;
+    for (let u = uMin; u <= uMax; u += stepU) {
+      for (let v = vMin; v <= vMax; v += stepV) {
+        const nu = (u - cu) / ru, nv = (v - cv) / rv;
+        if (nu * nu + nv * nv <= 1.0) {
+          const val = samplePlaneHU(plane, u, v);
+          if (val !== null) { sum += val; sum2 += val * val; count++; }
+        }
+      }
+    }
+    const mean = count ? sum / count : 0;
+    const variance = count > 1 ? Math.max(0, sum2 / count - mean * mean) : 0;
+    return { areaMm2, mean, sd: Math.sqrt(variance), count };
+  }
+
+  function renderAll2D() {
+    render2DPlane('axial');
+    render2DPlane('coronal');
+    render2DPlane('sagittal');
+  }
+
+  // =========================================================
+  // 4. MOTOR VOLUMÉTRICO 3D (WebGL2 RAYMARCHING + FALLBACK)
+  // =========================================================
+  const vrEngine = {
+    gl: null,
+    program: null,
+    vao: null,
+    tex3d: null,
+    texLUT: null,
+    uniforms: {},
+    fallback2d: false,
+    normVol: null,
+    needsRender: true
+  };
+
+  const VS_SRC = `#version 300 es
+  in vec2 aPos;
+  out vec2 vUV;
+  void main() {
+    vUV = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+  }`;
+
+  const FS_SRC = `#version 300 es
+  precision highp float;
+  precision highp sampler3D;
+
+  in vec2 vUV;
+  out vec4 outColor;
+
+  uniform sampler3D uVol;
+  uniform sampler2D uLUT;
+  uniform vec2 uRes;
+  uniform mat3 uCamRot;
+  uniform float uDist;
+  uniform vec3 uScale;
+  uniform vec3 uClip;
+  uniform int uMode;       // 0=VR, 1=MIP, 2=MinIP, 3=ISO
+  uniform float uThresh;
+  uniform float uGain;
+  uniform int uSteps;
+
+  vec2 intersectBox(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax) {
+    vec3 invD = 1.0 / rd;
+    vec3 t0 = (bmin - ro) * invD;
+    vec3 t1 = (bmax - ro) * invD;
+    vec3 tsmall = min(t0, t1);
+    vec3 tbig = max(t0, t1);
+    float tmin = max(max(tsmall.x, tsmall.y), tsmall.z);
+    float tmax = min(min(tbig.x, tbig.y), tbig.z);
+    return vec2(tmin, tmax);
+  }
+
+  vec3 calcGrad(vec3 p) {
+    float e = 0.012;
+    float gx = texture(uVol, p + vec3(e,0,0)).r - texture(uVol, p - vec3(e,0,0)).r;
+    float gy = texture(uVol, p + vec3(0,e,0)).r - texture(uVol, p - vec3(0,e,0)).r;
+    float gz = texture(uVol, p + vec3(0,0,e)).r - texture(uVol, p - vec3(0,0,e)).r;
+    return normalize(vec3(gx, gy, gz) + 1e-5);
+  }
+
+  void main() {
+    vec2 ndc = (vUV * 2.0 - 1.0);
+    ndc.x *= uRes.x / max(uRes.y, 1.0);
+
+    vec3 ro = uCamRot * vec3(0.0, 0.0, uDist);
+    vec3 rd = normalize(uCamRot * vec3(ndc, -1.75));
+
+    vec3 halfBox = uScale * 0.5;
+    vec3 bmin = -halfBox;
+    vec3 bmax = mix(-halfBox, halfBox, uClip);
+
+    vec2 hit = intersectBox(ro, rd, bmin, bmax);
+    if (hit.x > hit.y || hit.y < 0.0) {
+      float bg = 0.045 - length(ndc) * 0.022;
+      outColor = vec4(bg * 0.55, bg * 0.85, bg * 1.35, 1.0);
+      return;
+    }
+
+    float tStart = max(hit.x, 0.0);
+    float tEnd = hit.y;
+    float dt = (tEnd - tStart) / float(uSteps);
+
+    // Dithering subtil para eliminar banding em ângulos rasantes
+    float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float t = tStart + jitter * dt;
+
+    vec3 lightDir = normalize(uCamRot * vec3(0.55, 0.75, 0.85));
+    vec3 viewDir = -rd;
+
+    if (uMode == 1) { // MIP
+      float maxV = 0.0;
+      for (int i = 0; i < 240; i++) {
+        if (i >= uSteps || t > tEnd) break;
+        vec3 uvw = (ro + rd * t + halfBox) / uScale;
+        float v = texture(uVol, uvw).r;
+        maxV = max(maxV, v);
+        t += dt;
+      }
+      float s = clamp((maxV - uThresh * 0.45) * uGain, 0.0, 1.0);
+      vec3 col = texture(uLUT, vec2(s, 0.5)).rgb;
+      outColor = vec4(mix(vec3(0.02,0.04,0.08), col, smoothstep(0.02, 0.15, s)), 1.0);
+      return;
+    }
+
+    if (uMode == 2) { // MinIP
+      float minV = 1.0;
+      for (int i = 0; i < 240; i++) {
+        if (i >= uSteps || t > tEnd) break;
+        vec3 uvw = (ro + rd * t + halfBox) / uScale;
+        float v = texture(uVol, uvw).r;
+        if (v > 0.02) minV = min(minV, v);
+        t += dt;
+      }
+      float s = clamp((1.0 - minV) * uGain * 0.85, 0.0, 1.0);
+      outColor = vec4(vec3(s * 0.75, s * 0.92, s), 1.0);
+      return;
+    }
+
+    if (uMode == 3) { // Iso-Superfície
+      for (int i = 0; i < 240; i++) {
+        if (i >= uSteps || t > tEnd) break;
+        vec3 uvw = (ro + rd * t + halfBox) / uScale;
+        float v = texture(uVol, uvw).r;
+        if (v >= uThresh) {
+          vec3 N = -calcGrad(uvw);
+          float diff = max(dot(N, lightDir), 0.0);
+          vec3 H = normalize(lightDir + viewDir);
+          float spec = pow(max(dot(N, H), 0.0), 32.0);
+          vec3 baseCol = texture(uLUT, vec2(clamp(v, 0.0, 1.0), 0.5)).rgb;
+          vec3 col = baseCol * (0.26 + 0.78 * diff) + vec3(0.45) * spec;
+          outColor = vec4(col, 1.0);
+          return;
+        }
+        t += dt;
+      }
+      outColor = vec4(0.02, 0.04, 0.08, 1.0);
+      return;
+    }
+
+    // Modo 0: Volume Rendering (VR com sombreamento Blinn-Phong)
+    vec3 accumCol = vec3(0.0);
+    float accumA = 0.0;
+    for (int i = 0; i < 240; i++) {
+      if (i >= uSteps || t > tEnd || accumA > 0.97) break;
+      vec3 uvw = (ro + rd * t + halfBox) / uScale;
+      float v = texture(uVol, uvw).r;
+      if (v > uThresh) {
+        float normV = clamp((v - uThresh) / max(1.0 - uThresh, 0.05), 0.0, 1.0);
+        vec4 tf = texture(uLUT, vec2(normV, 0.5));
+        float a = clamp(tf.a * uGain * dt * 3.8, 0.0, 0.85);
+        if (a > 0.004) {
+          vec3 N = -calcGrad(uvw);
+          float diff = max(dot(N, lightDir), 0.0);
+          vec3 H = normalize(lightDir + viewDir);
+          float spec = pow(max(dot(N, H), 0.0), 22.0);
+          vec3 shaded = tf.rgb * (0.34 + 0.72 * diff) + vec3(0.32) * spec;
+          accumCol += (1.0 - accumA) * shaded * a;
+          accumA += (1.0 - accumA) * a;
+        }
+      }
+      t += dt;
+    }
+    vec3 bgCol = vec3(0.02, 0.04, 0.08);
+    outColor = vec4(accumCol + (1.0 - accumA) * bgCol, 1.0);
+  }`;
+
+  function initWebGL3D() {
+    const canvas = $('canvas-vr3d');
+    const gl = canvas.getContext('webgl2', { antialias: true, preserveDrawingBuffer: true, alpha: false });
+    if (!gl) {
+      vrEngine.fallback2d = true;
+      $('hud-3d-engine').textContent = 'Modo Compatibilidade 2D MIP';
+      return;
+    }
+    vrEngine.gl = gl;
+
+    const compile = (type, src) => {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.error('Shader error:', gl.getShaderInfoLog(sh));
+        return null;
+      }
+      return sh;
+    };
+    const vs = compile(gl.VERTEX_SHADER, VS_SRC);
+    const fs = compile(gl.FRAGMENT_SHADER, FS_SRC);
+    if (!vs || !fs) {
+      vrEngine.fallback2d = true;
+      $('hud-3d-engine').textContent = 'Modo Compatibilidade 2D MIP';
+      return;
+    }
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      vrEngine.fallback2d = true;
+      return;
+    }
+    vrEngine.program = prog;
+
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    vrEngine.vao = vao;
+
+    ['uVol','uLUT','uRes','uCamRot','uDist','uScale','uClip','uMode','uThresh','uGain','uSteps'].forEach(u => {
+      vrEngine.uniforms[u] = gl.getUniformLocation(prog, u);
+    });
+
+    vrEngine.texLUT = gl.createTexture();
+    updateVRTransferFunction(state.vr.preset);
+  }
+
+  function updateVRTransferFunction(presetName) {
+    state.vr.preset = presetName;
+    const data = new Uint8Array(256 * 4);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      let r = 255, g = 255, b = 255, a = t;
+      if (presetName === 'bone') {
+        // Paleta ouro/marfim clínica (em sintonia com o logótipo OsiriWeb 3D)
+        r = clamp(Math.round(140 + t * 115), 0, 255);
+        g = clamp(Math.round(70 + Math.pow(t, 0.85) * 165), 0, 255);
+        b = clamp(Math.round(25 + Math.pow(t, 1.5) * 185), 0, 255);
+        a = Math.pow(t, 1.25) * 0.95;
+      } else if (presetName === 'angio') {
+        r = clamp(Math.round(180 + t * 75), 0, 255);
+        g = clamp(Math.round(25 + Math.pow(t, 1.6) * 210), 0, 255);
+        b = clamp(Math.round(20 + Math.pow(t, 2.2) * 180), 0, 255);
+        a = Math.pow(t, 1.1) * 0.92;
+      } else if (presetName === 'soft') {
+        r = clamp(Math.round(160 + t * 80), 0, 255);
+        g = clamp(Math.round(95 + t * 110), 0, 255);
+        b = clamp(Math.round(85 + t * 105), 0, 255);
+        a = Math.pow(t, 1.5) * 0.65;
+      } else if (presetName === 'lung') {
+        r = clamp(Math.round(35 + t * 145), 0, 255);
+        g = clamp(Math.round(170 + t * 80), 0, 255);
+        b = clamp(Math.round(215 + t * 40), 0, 255);
+        a = Math.pow(t, 1.35) * 0.55;
+      } else if (presetName === 'pet') {
+        r = clamp(Math.round(Math.sin(t * Math.PI * 1.1) * 255 + t * 90), 0, 255);
+        g = clamp(Math.round(Math.pow(t, 1.4) * 255), 0, 255);
+        b = clamp(Math.round((1 - t) * 240), 0, 255);
+        a = Math.pow(t, 1.15) * 0.85;
+      }
+      data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = Math.round(clamp(a, 0, 1) * 255);
+    }
+
+    const gl = vrEngine.gl;
+    if (!gl || !vrEngine.texLUT) return;
+    gl.bindTexture(gl.TEXTURE_2D, vrEngine.texLUT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    request3DRender();
+  }
+
+  function uploadVolumeTo3D(vol) {
+    const total = vol.nx * vol.ny * vol.nz;
+    const norm = new Uint8Array(total);
+    const lo = vol.minHU, range = Math.max(1, vol.maxHU - lo);
+    for (let i = 0; i < total; i++) {
+      norm[i] = clamp(Math.round(((vol.data[i] - lo) / range) * 255), 0, 255);
+    }
+    vrEngine.normVol = norm;
+
+    const gl = vrEngine.gl;
+    if (!gl) return;
+    if (vrEngine.tex3d) gl.deleteTexture(vrEngine.tex3d);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, vol.nx, vol.ny, vol.nz, 0, gl.RED, gl.UNSIGNED_BYTE, norm);
+    vrEngine.tex3d = tex;
+    request3DRender();
+  }
+
+  function buildCamRotMatrix(yaw, pitch) {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    // RotY(yaw) * RotX(pitch) em column-major para WebGL
+    return new Float32Array([
+      cy,          0,   -sy,
+      sy * sp,    cp,   cy * sp,
+      sy * cp,   -sp,   cy * cp
+    ]);
+  }
+
+  function render3DNow() {
+    const vp = $('vp-vr3d');
+    if (!vp || vp.classList.contains('hidden') || !state.volume) return;
+    const canvas = $('canvas-vr3d');
+    const dpr = Math.min(window.devicePixelRatio || 1, state.vr.interacting ? 1.0 : 1.75);
+    const cw = Math.max(1, Math.floor(vp.clientWidth * dpr));
+    const ch = Math.max(1, Math.floor(vp.clientHeight * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw; canvas.height = ch;
+    }
+
+    const modeNames = ['VR', 'MIP', 'MinIP', 'ISO'];
+    const presetNames = { bone:'OSSO', angio:'ANGIO', soft:'MOLES', lung:'PULMÃO', pet:'PET' };
+    $('hud-3d-tag').textContent = `3D · ${modeNames[state.vr.mode]} ${presetNames[state.vr.preset] || ''}`;
+    $('hud-3d-angles').textContent = `Yaw ${Math.round(state.vr.yaw * 57.3)}° · Pitch ${Math.round(state.vr.pitch * 57.3)}°`;
+
+    if (vrEngine.fallback2d || !vrEngine.gl) {
+      render3DFallback2D(canvas);
+      return;
+    }
+
+    const gl = vrEngine.gl;
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(vrEngine.program);
+    gl.bindVertexArray(vrEngine.vao);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_3D, vrEngine.tex3d);
+    gl.uniform1i(vrEngine.uniforms.uVol, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, vrEngine.texLUT);
+    gl.uniform1i(vrEngine.uniforms.uLUT, 1);
+
+    const vol = state.volume;
+    const px = vol.nx * vol.spacing[0];
+    const py = vol.ny * vol.spacing[1];
+    const pz = vol.nz * vol.spacing[2] * state.vr.zScale;
+    const maxP = Math.max(px, py, pz);
+
+    gl.uniform2f(vrEngine.uniforms.uRes, cw, ch);
+    gl.uniformMatrix3fv(vrEngine.uniforms.uCamRot, false, buildCamRotMatrix(state.vr.yaw, state.vr.pitch));
+    gl.uniform1f(vrEngine.uniforms.uDist, state.vr.dist);
+    gl.uniform3f(vrEngine.uniforms.uScale, px / maxP, py / maxP, pz / maxP);
+    gl.uniform3f(vrEngine.uniforms.uClip, state.vr.clip[0], state.vr.clip[1], state.vr.clip[2]);
+    gl.uniform1i(vrEngine.uniforms.uMode, state.vr.mode);
+    gl.uniform1f(vrEngine.uniforms.uThresh, state.vr.thresh);
+    gl.uniform1f(vrEngine.uniforms.uGain, state.vr.gain);
+    gl.uniform1i(vrEngine.uniforms.uSteps, state.vr.interacting ? 90 : 190);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function render3DFallback2D(canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.fillStyle = '#050a12';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#8ea5c4';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('WebGL2 indisponível neste dispositivo. Use as vistas MPR 2D.', w / 2, h / 2);
+  }
+
+  function request3DRender() {
+    vrEngine.needsRender = true;
+  }
+
+  function animationLoop() {
+    if (state.vr.autoRotate && !state.vr.interacting) {
+      state.vr.yaw = (state.vr.yaw + 0.012) % (Math.PI * 2);
+      vrEngine.needsRender = true;
+    }
+    if (vrEngine.needsRender) {
+      vrEngine.needsRender = false;
+      render3DNow();
+    }
+    requestAnimationFrame(animationLoop);
+  }
+
+  // =========================================================
+  // 5. CARREGAMENTO DE ESTUDO & SINCRONIZAÇÃO UI
+  // =========================================================
+  function loadStudy(study) {
+    state.studies[study.id] = study;
+    state.currentStudyId = study.id;
+    state.volume = study;
+
+    // Garantir opção no dropdown
+    const sel = $('studySelect');
+    if (![...sel.options].some(o => o.value === study.id)) {
+      const opt = document.createElement('option');
+      opt.value = study.id;
+      opt.textContent = study.name;
+      sel.appendChild(opt);
+    }
+    sel.value = study.id;
+
+    state.slices.axial = Math.floor(study.nz / 2);
+    state.slices.coronal = Math.floor(study.ny / 2);
+    state.slices.sagittal = Math.floor(study.nx / 2);
+    state.measurements = { axial: [], coronal: [], sagittal: [] };
+    resetViews(false);
+
+    state.ww = study.defaultWW || Math.max(255, study.maxHU - study.minHU);
+    state.wl = study.defaultWL !== undefined ? study.defaultWL : Math.round((study.maxHU + study.minHU) / 2);
+    syncWLControls();
+
+    const preset = study.defaultPreset || 'bone';
+    apply3DPreset(preset);
+
+    uploadVolumeTo3D(study);
+    $('studyMetaBox').innerHTML = `
+      <div><strong>Dimensões:</strong> ${study.nx} × ${study.ny} × ${study.nz} voxels</div>
+      <div><strong>Espaçamento:</strong> ${study.spacing[0].toFixed(2)} × ${study.spacing[1].toFixed(2)} × ${study.spacing[2].toFixed(2)} mm</div>
+      <div><strong>Intervalo:</strong> ${study.minHU} a ${study.maxHU} HU</div>
+      <div><strong>Modalidade:</strong> ${study.meta.modality || 'CT/RM'}</div>
+    `;
+    renderAll2D();
+    request3DRender();
+  }
+
+  function syncWLControls() {
+    $('sliderWW').value = clamp(Math.round(state.ww), 10, 4000);
+    $('sliderWL').value = clamp(Math.round(state.wl), -1000, 2000);
+    $('val-ww').textContent = Math.round(state.ww);
+    $('val-wl').textContent = Math.round(state.wl);
+  }
+
+  function apply3DPreset(preset) {
+    document.querySelectorAll('#vrPresetGroup .chip').forEach(c => c.classList.toggle('active', c.dataset.preset === preset));
+    const defaults = {
+      bone:  { thresh: 0.44, gain: 1.65 },
+      angio: { thresh: 0.48, gain: 1.90 },
+      soft:  { thresh: 0.32, gain: 0.95 },
+      lung:  { thresh: 0.14, gain: 0.85 },
+      pet:   { thresh: 0.36, gain: 1.45 }
+    };
+    const d = defaults[preset] || defaults.bone;
+    state.vr.thresh = d.thresh;
+    state.vr.gain = d.gain;
+    $('vrThresh').value = d.thresh; $('val-vrThresh').textContent = d.thresh.toFixed(2);
+    $('vrGain').value = d.gain; $('val-vrGain').textContent = d.gain.toFixed(2);
+    updateVRTransferFunction(preset);
+  }
+
+  function resetViews(rerender = true) {
+    ['axial', 'coronal', 'sagittal'].forEach(p => {
+      state.view2d[p] = { zoom: 1, panX: 0, panY: 0 };
+    });
+    state.vr.yaw = 0.55;
+    state.vr.pitch = 0.25;
+    state.vr.dist = 2.35;
+    state.vr.clip = [1, 1, 1];
+    $('clipX').value = 1; $('clipY').value = 1; $('clipZ').value = 1;
+    if (rerender) { renderAll2D(); request3DRender(); }
+  }
+
+  function setLayout(layout) {
+    state.layout = layout;
+    document.querySelectorAll('#layoutGroup .btn').forEach(b => b.classList.toggle('active', b.dataset.layout === layout));
+    const wrap = $('viewportsWrap');
+    wrap.className = 'viewports-wrap layout-' + layout;
+    $('singlePlaneSelect').style.display = layout === '2d' ? 'inline-block' : 'none';
+
+    const planes = ['axial', 'coronal', 'sagittal', 'vr3d'];
+    planes.forEach(p => {
+      const el = $('vp-' + p);
+      if (layout === 'mpr3d') el.classList.remove('hidden');
+      else if (layout === '3d') el.classList.toggle('hidden', p !== 'vr3d');
+      else el.classList.toggle('hidden', p !== state.singlePlane);
+    });
+    setTimeout(() => { renderAll2D(); request3DRender(); }, 20);
+  }
+
+  // =========================================================
+  // 6. INTERAÇÃO RATO + TOQUE (iPad / iPhone / Desktop)
+  // =========================================================
+  function setup2DViewportEvents(plane) {
+    const vp = $('vp-' + plane);
+    const canvas = $('canvas-' + plane);
+    const pointers = new Map();
+    let lastX = 0, lastY = 0, pinchDist0 = 0, zoom0 = 1;
+
+    const getLocalPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = canvas.width / Math.max(1, rect.width);
+      return { x: (e.clientX - rect.left) * dpr, y: (e.clientY - rect.top) * dpr };
+    };
+
+    const moveCrosshairAt = (pos) => {
+      const { u, v } = screenToVoxel2D(plane, pos.x, pos.y, canvas.width, canvas.height);
+      const vol = state.volume;
+      if (!vol || u < 0 || u > 1 || v < 0 || v > 1) return;
+      if (plane === 'axial') {
+        state.slices.sagittal = clamp(Math.floor(u * vol.nx), 0, vol.nx - 1);
+        state.slices.coronal = clamp(Math.floor(v * vol.ny), 0, vol.ny - 1);
+      } else if (plane === 'coronal') {
+        state.slices.sagittal = clamp(Math.floor(u * vol.nx), 0, vol.nx - 1);
+        state.slices.axial = clamp(vol.nz - 1 - Math.floor(v * vol.nz), 0, vol.nz - 1);
+      } else {
+        state.slices.coronal = clamp(Math.floor(u * vol.ny), 0, vol.ny - 1);
+        state.slices.axial = clamp(vol.nz - 1 - Math.floor(v * vol.nz), 0, vol.nz - 1);
+      }
+      renderAll2D();
+    };
+
+    vp.addEventListener('pointerdown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      state.activePlane = plane;
+      document.querySelectorAll('.vp').forEach(el => el.classList.toggle('selected', el.id === 'vp-' + plane));
+      vp.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        pinchDist0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        zoom0 = state.view2d[plane].zoom;
+        state.activeDraw = null;
+        return;
+      }
+
+      lastX = e.clientX; lastY = e.clientY;
+      const pos = getLocalPos(e);
+      if (state.tool === 'crosshair') {
+        moveCrosshairAt(pos);
+      } else if (state.tool === 'ruler' || state.tool === 'roi') {
+        const { u, v } = screenToVoxel2D(plane, pos.x, pos.y, canvas.width, canvas.height);
+        state.activeDraw = {
+          type: state.tool, plane, slice: state.slices[plane],
+          u1: clamp(u, 0, 1), v1: clamp(v, 0, 1), u2: clamp(u, 0, 1), v2: clamp(v, 0, 1)
+        };
+        render2DPlane(plane);
+      }
+    });
+
+    vp.addEventListener('pointermove', (e) => {
+      const pos = getLocalPos(e);
+      const { u, v } = screenToVoxel2D(plane, pos.x, pos.y, canvas.width, canvas.height);
+      const hu = samplePlaneHU(plane, u, v);
+      $(`hud-${plane}-hu`).textContent = hu !== null ? `${hu} HU` : '';
+
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchDist0 > 10) {
+          state.view2d[plane].zoom = clamp(zoom0 * (dist / pinchDist0), 0.4, 8.0);
+          render2DPlane(plane);
+        }
+        return;
+      }
+
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+
+      if (state.tool === 'scroll') {
+        const dim = getPlaneDims(plane);
+        const step = Math.round(dy * 0.45);
+        if (step !== 0) {
+          state.slices[plane] = clamp(state.slices[plane] + step, 0, dim.d - 1);
+          renderAll2D();
+        }
+      } else if (state.tool === 'wl') {
+        state.ww = clamp(state.ww + dx * 4, 10, 4000);
+        state.wl = clamp(state.wl - dy * 3, -1000, 2000);
+        syncWLControls();
+        renderAll2D();
+      } else if (state.tool === 'pan') {
+        const dpr = canvas.width / Math.max(1, canvas.clientWidth);
+        state.view2d[plane].panX += dx * dpr;
+        state.view2d[plane].panY += dy * dpr;
+        render2DPlane(plane);
+      } else if (state.tool === 'crosshair') {
+        moveCrosshairAt(pos);
+      } else if (state.activeDraw && state.activeDraw.plane === plane) {
+        state.activeDraw.u2 = clamp(u, 0, 1);
+        state.activeDraw.v2 = clamp(v, 0, 1);
+        render2DPlane(plane);
+      }
+    });
+
+    const endPtr = (e) => {
+      pointers.delete(e.pointerId);
+      if (state.activeDraw && state.activeDraw.plane === plane) {
+        const d = Math.hypot(state.activeDraw.u2 - state.activeDraw.u1, state.activeDraw.v2 - state.activeDraw.v1);
+        if (d > 0.015) state.measurements[plane].push(state.activeDraw);
+        state.activeDraw = null;
+        render2DPlane(plane);
+      }
+    };
+    vp.addEventListener('pointerup', endPtr);
+    vp.addEventListener('pointercancel', endPtr);
+
+    vp.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.ctrlKey || state.tool === 'pan') {
+        state.view2d[plane].zoom = clamp(state.view2d[plane].zoom * (e.deltaY < 0 ? 1.1 : 0.91), 0.4, 8.0);
+        render2DPlane(plane);
+      } else {
+        const dim = getPlaneDims(plane);
+        state.slices[plane] = clamp(state.slices[plane] + (e.deltaY > 0 ? 1 : -1), 0, dim.d - 1);
+        renderAll2D();
+      }
+    }, { passive: false });
+
+    $(`slider-${plane}`).addEventListener('input', (e) => {
+      state.slices[plane] = parseInt(e.target.value, 10);
+      renderAll2D();
+    });
+  }
+
+  function setup3DViewportEvents() {
+    const vp = $('vp-vr3d');
+    const pointers = new Map();
+    let lastX = 0, lastY = 0, pinch0 = 0, dist0 = 2.35, lastTap = 0;
+
+    vp.addEventListener('pointerdown', (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300 && pointers.size === 0) {
+        state.vr.yaw = 0.55; state.vr.pitch = 0.25; state.vr.dist = 2.35;
+        request3DRender();
+      }
+      lastTap = now;
+      vp.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      state.vr.interacting = true;
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        pinch0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        dist0 = state.vr.dist;
+      } else {
+        lastX = e.clientX; lastY = e.clientY;
+      }
+    });
+
+    vp.addEventListener('pointermove', (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinch0 > 10) {
+          state.vr.dist = clamp(dist0 * (pinch0 / d), 1.15, 5.2);
+          request3DRender();
+        }
+        return;
+      }
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      state.vr.yaw += dx * 0.009;
+      state.vr.pitch = clamp(state.vr.pitch + dy * 0.009, -1.48, 1.48);
+      request3DRender();
+    });
+
+    const endPtr = (e) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size === 0) {
+        state.vr.interacting = false;
+        request3DRender(); // Passagem de alta qualidade ao soltar
+      }
+    };
+    vp.addEventListener('pointerup', endPtr);
+    vp.addEventListener('pointercancel', endPtr);
+
+    vp.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      state.vr.dist = clamp(state.vr.dist * (e.deltaY > 0 ? 1.07 : 0.93), 1.15, 5.2);
+      request3DRender();
+    }, { passive: false });
+  }
+
+  // =========================================================
+  // 7. IMPORTADOR MULTIFONTE (DICOM · VÍDEO · IMAGENS · PDF)
+  // =========================================================
+  function setImportProgress(active, label = '', pct = 0) {
+    $('importProgress').classList.toggle('active', active);
+    $('importProgressLabel').textContent = label;
+    $('importProgressPct').textContent = `${Math.round(pct)}%`;
+    $('importProgressFill').style.width = `${clamp(pct, 0, 100)}%`;
+  }
+
+  function resample2DSlice(srcData, srcW, srcH, dstW, dstH) {
+    const out = new Int16Array(dstW * dstH);
+    for (let y = 0; y < dstH; y++) {
+      const sy = Math.min(srcH - 1, Math.floor((y / dstH) * srcH));
+      const sRow = sy * srcW;
+      const dRow = y * dstW;
+      for (let x = 0; x < dstW; x++) {
+        const sx = Math.min(srcW - 1, Math.floor((x / dstW) * srcW));
+        out[dRow + x] = srcData[sRow + sx];
+      }
+    }
+    return out;
+  }
+
+  // Extrai fatias de um ArrayBuffer DICOM (usa dicomParser se disponível + fallback nativo)
+  function parseDicomBuffer(arrayBuffer, fallbackIndex) {
+    const bytes = new Uint8Array(arrayBuffer);
+    if (window.dicomParser) {
+      const ds = window.dicomParser.parseDicom(bytes);
+      const rows = ds.uint16('x00280010') || 256;
+      const cols = ds.uint16('x00280011') || 256;
+      const bits = ds.uint16('x00280100') || 16;
+      const signed = ds.uint16('x00280103') || 0;
+      const slope = parseFloat(ds.string('x00281053') || '1') || 1;
+      const intercept = parseFloat(ds.string('x00281052') || '0') || 0;
+      const pxSpStr = ds.string('x00280030') || '1\\1';
+      const pxSp = pxSpStr.split('\\').map(Number);
+      const thickness = parseFloat(ds.string('x00180050') || '1.5') || 1.5;
+      const sliceLoc = parseFloat(ds.string('x00201041'));
+      const instNum = parseInt(ds.string('x00200013') || fallbackIndex, 10);
+      const modality = ds.string('x00080060') || 'CT';
+      const patient = (ds.string('x00100010') || 'DICOM IMPORTADO').replace(/\^/g, ' ').trim();
+
+      const pxElem = ds.elements.x7fe00010;
+      if (!pxElem) throw new Error('Ficheiro sem PixelData descomprimido.');
+      const count = rows * cols;
+      const hu = new Int16Array(count);
+      const dv = new DataView(arrayBuffer, pxElem.dataOffset, Math.min(pxElem.length, arrayBuffer.byteLength - pxElem.dataOffset));
+
+      if (bits === 16) {
+        for (let i = 0; i < count && i * 2 + 1 < dv.byteLength; i++) {
+          const raw = signed ? dv.getInt16(i * 2, true) : dv.getUint16(i * 2, true);
+          hu[i] = clamp(Math.round(raw * slope + intercept), -2048, 4096);
+        }
+      } else {
+        for (let i = 0; i < count && i < dv.byteLength; i++) {
+          hu[i] = clamp(Math.round(dv.getUint8(i) * slope + intercept), -2048, 4096);
+        }
+      }
+      return {
+        rows, cols, hu,
+        spacingX: pxSp[1] || pxSp[0] || 1.0,
+        spacingY: pxSp[0] || 1.0,
+        thickness,
+        sortKey: Number.isFinite(sliceLoc) ? sliceLoc : instNum,
+        modality, patient
+      };
+    }
+    throw new Error('Biblioteca dicom-parser indisponível offline.');
+  }
+
+  async function importDicomPipeline() {
+    const files = state.importState.dicomFiles;
+    if (!files.length) { showToast('Seleciona primeiro ficheiros DICOM (.dcm).'); return; }
+    const maxDim = parseInt($('dicomMaxDim').value, 10) || 192;
+    setImportProgress(true, 'A ler metadados DICOM...', 5);
+
+    const parsed = [];
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const buf = await files[i].arrayBuffer();
+        parsed.push(parseDicomBuffer(buf, i));
+      } catch (err) {
+        console.warn('Ignorado:', files[i].name, err.message);
+      }
+      if (i % 4 === 0) {
+        setImportProgress(true, `A ler DICOM (${i + 1}/${files.length})...`, 5 + (i / files.length) * 65);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    if (!parsed.length) {
+      setImportProgress(false);
+      showToast('Nenhum ficheiro DICOM descomprimido válido encontrado.');
+      return;
+    }
+    parsed.sort((a, b) => a.sortKey - b.sortKey);
+
+    const ref = parsed[0];
+    const scale = Math.min(1, maxDim / Math.max(ref.cols, ref.rows));
+    const nx = Math.max(16, Math.round(ref.cols * scale));
+    const ny = Math.max(16, Math.round(ref.rows * scale));
+    const nz = parsed.length;
+    const data = new Int16Array(nx * ny * nz);
+
+    let minHU = 32767, maxHU = -32768;
+    for (let z = 0; z < nz; z++) {
+      const sl = resample2DSlice(parsed[z].hu, parsed[z].cols, parsed[z].rows, nx, ny);
+      data.set(sl, z * nx * ny);
+      for (let i = 0; i < sl.length; i++) {
+        if (sl[i] < minHU) minHU = sl[i];
+        if (sl[i] > maxHU) maxHU = sl[i];
+      }
+      if (z % 6 === 0) setImportProgress(true, `A empilhar cortes 3D (${z + 1}/${nz})...`, 70 + (z / nz) * 28);
+    }
+
+    const study = {
+      id: 'dicom_' + Date.now(),
+      name: `DICOM · ${ref.patient.slice(0, 18)} (${nz} cortes)`,
+      data, nx, ny, nz,
+      spacing: [ref.spacingX / scale, ref.spacingY / scale, ref.thickness],
+      minHU, maxHU,
+      defaultWW: Math.min(2000, Math.max(200, maxHU - minHU)),
+      defaultWL: Math.round((minHU + maxHU) / 2),
+      defaultPreset: ref.modality === 'MR' ? 'soft' : 'bone',
+      meta: { patient: ref.patient, modality: ref.modality, studyDate: new Date().toISOString().slice(0,10) }
+    };
+    setImportProgress(false);
+    $('importModal').classList.remove('open');
+    loadStudy(study);
+    showToast(`Volume DICOM reconstruído: ${nx}×${ny}×${nz}`);
+  }
+
+  function drawCropOverlay(canvas, sourceEl, crop) {
+    const sw = sourceEl.videoWidth || sourceEl.naturalWidth || sourceEl.width;
+    const sh = sourceEl.videoHeight || sourceEl.naturalHeight || sourceEl.height;
+    if (!sw || !sh) return;
+    const scale = Math.min(540 / sw, 280 / sh, 1);
+    canvas.width = Math.round(sw * scale);
+    canvas.height = Math.round(sh * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(sourceEl, 0, 0, canvas.width, canvas.height);
+
+    const rx = crop.x * canvas.width, ry = crop.y * canvas.height;
+    const rw = crop.w * canvas.width, rh = crop.h * canvas.height;
+    ctx.fillStyle = 'rgba(0,0,0,0.52)';
+    ctx.fillRect(0, 0, canvas.width, ry);
+    ctx.fillRect(0, ry + rh, canvas.width, canvas.height - ry - rh);
+    ctx.fillRect(0, ry, rx, rh);
+    ctx.fillRect(rx + rw, ry, canvas.width - rx - rw, rh);
+
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx, ry, rw, rh);
+  }
+
+  function extractGrayscaleCanvasToHU(ctx, w, h) {
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const out = new Int16Array(w * h);
+    for (let i = 0, j = 0; i < out.length; i++, j += 4) {
+      const lum = Math.round(0.299 * img[j] + 0.587 * img[j + 1] + 0.114 * img[j + 2]);
+      // Mapear 0..255 para pseudo-HU (-1000 .. +1550) para compatibilidade com presets 3D
+      out[i] = Math.round((lum / 255) * 2550 - 1000);
+    }
+    return out;
+  }
+
+  async function importVideoPipeline() {
+    const vid = state.importState.videoEl;
+    if (!vid || !vid.duration) { showToast('Carrega primeiro um ficheiro de vídeo.'); return; }
+    const nz = clamp(parseInt($('vidSlices').value, 10) || 64, 8, 180);
+    const zMm = parseFloat($('vidZMm').value) || 1.5;
+    const crop = state.importState.videoCrop;
+    const nx = 144, ny = 144;
+    const data = new Int16Array(nx * ny * nz);
+    const work = document.createElement('canvas');
+    work.width = nx; work.height = ny;
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+
+    const sx = Math.round(crop.x * vid.videoWidth);
+    const sy = Math.round(crop.y * vid.videoHeight);
+    const sw = Math.max(16, Math.round(crop.w * vid.videoWidth));
+    const sh = Math.max(16, Math.round(crop.h * vid.videoHeight));
+
+    setImportProgress(true, 'A extrair cortes do vídeo...', 0);
+    for (let z = 0; z < nz; z++) {
+      const t = (z / Math.max(1, nz - 1)) * Math.max(0.05, vid.duration - 0.04);
+      await new Promise((resolve) => {
+        const onSeek = () => { vid.removeEventListener('seeked', onSeek); resolve(); };
+        vid.addEventListener('seeked', onSeek);
+        vid.currentTime = t;
+      });
+      wctx.drawImage(vid, sx, sy, sw, sh, 0, 0, nx, ny);
+      data.set(extractGrayscaleCanvasToHU(wctx, nx, ny), z * nx * ny);
+      setImportProgress(true, `A extrair corte ${z + 1}/${nz}...`, ((z + 1) / nz) * 100);
+    }
+
+    const study = {
+      id: 'vid_' + Date.now(),
+      name: `Vídeo → TAC (${nz} cortes)`,
+      data, nx, ny, nz,
+      spacing: [1.5, 1.5, zMm],
+      minHU: -1000, maxHU: 1550,
+      defaultWW: 2200, defaultWL: 250, defaultPreset: 'bone',
+      meta: { patient: state.importState.videoFile.name.slice(0, 22), modality: 'VIDEO → 3D' }
+    };
+    setImportProgress(false);
+    $('importModal').classList.remove('open');
+    loadStudy(study);
+    showToast(`Volume 3D criado a partir de vídeo (${nx}×${ny}×${nz})`);
+  }
+
+  async function importImagesPipeline() {
+    const files = state.importState.imageFiles;
+    if (!files.length) { showToast('Seleciona uma sequência de imagens.'); return; }
+    const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    const nz = sorted.length;
+    const zMm = parseFloat($('imgZMm').value) || 1.5;
+    const margin = clamp((parseFloat($('imgMargin').value) || 0) / 100, 0, 0.35);
+    const nx = 160, ny = 160;
+    const data = new Int16Array(nx * ny * nz);
+    const work = document.createElement('canvas');
+    work.width = nx; work.height = ny;
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+
+    setImportProgress(true, 'A empilhar sequência de imagens...', 0);
+    for (let z = 0; z < nz; z++) {
+      const url = URL.createObjectURL(sorted[z]);
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = rej;
+        im.src = url;
+      });
+      URL.revokeObjectURL(url);
+      const sx = img.naturalWidth * margin, sy = img.naturalHeight * margin;
+      const sw = img.naturalWidth * (1 - 2 * margin), sh = img.naturalHeight * (1 - 2 * margin);
+      wctx.drawImage(img, sx, sy, sw, sh, 0, 0, nx, ny);
+      data.set(extractGrayscaleCanvasToHU(wctx, nx, ny), z * nx * ny);
+      setImportProgress(true, `A empilhar imagem ${z + 1}/${nz}...`, ((z + 1) / nz) * 100);
+    }
+
+    const study = {
+      id: 'img_' + Date.now(),
+      name: `Imagens → TAC (${nz} cortes)`,
+      data, nx, ny, nz,
+      spacing: [1.5, 1.5, zMm],
+      minHU: -1000, maxHU: 1550,
+      defaultWW: 2200, defaultWL: 250, defaultPreset: 'bone',
+      meta: { patient: 'SEQUÊNCIA IMAGENS', modality: 'IMG → 3D' }
+    };
+    setImportProgress(false);
+    $('importModal').classList.remove('open');
+    loadStudy(study);
+    showToast(`Volume 3D criado com ${nz} imagens!`);
+  }
+
+  async function renderPdfPreview() {
+    const doc = state.importState.pdfDoc;
+    if (!doc) return;
+    const page = await doc.getPage(1);
+    const vp = page.getViewport({ scale: 1.0 });
+    const scale = Math.min(520 / vp.width, 280 / vp.height);
+    const scaled = page.getViewport({ scale });
+    const canvas = $('pdfPreviewCanvas');
+    canvas.width = Math.round(scaled.width);
+    canvas.height = Math.round(scaled.height);
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport: scaled }).promise;
+
+    // Desenhar grelha Contact Sheet
+    const [cols, rows] = $('pdfGridPreset').value.split('x').map(Number);
+    const m = clamp((parseFloat($('pdfMargin').value) || 0) / 100, 0, 0.25);
+    const gx = canvas.width * m, gy = canvas.height * m;
+    const gw = canvas.width * (1 - 2 * m), gh = canvas.height * (1 - 2 * m);
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 1.6;
+    ctx.strokeRect(gx, gy, gw, gh);
+    for (let c = 1; c < cols; c++) {
+      ctx.beginPath(); ctx.moveTo(gx + (gw * c) / cols, gy); ctx.lineTo(gx + (gw * c) / cols, gy + gh); ctx.stroke();
+    }
+    for (let r = 1; r < rows; r++) {
+      ctx.beginPath(); ctx.moveTo(gx, gy + (gh * r) / rows); ctx.lineTo(gx + gw, gy + (gh * r) / rows); ctx.stroke();
+    }
+  }
+
+  async function importPdfPipeline() {
+    const doc = state.importState.pdfDoc;
+    if (!doc) { showToast('Carrega primeiro um ficheiro PDF.'); return; }
+    const [cols, rows] = $('pdfGridPreset').value.split('x').map(Number);
+    const m = clamp((parseFloat($('pdfMargin').value) || 0) / 100, 0, 0.25);
+    const zMm = parseFloat($('pdfZMm').value) || 2.0;
+    const nx = 144, ny = 144;
+    const slices = [];
+
+    const pageCanvas = document.createElement('canvas');
+    const pctx = pageCanvas.getContext('2d', { willReadFrequently: true });
+    const cellCanvas = document.createElement('canvas');
+    cellCanvas.width = nx; cellCanvas.height = ny;
+    const cctx = cellCanvas.getContext('2d', { willReadFrequently: true });
+
+    setImportProgress(true, 'A processar páginas PDF...', 0);
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const vp = page.getViewport({ scale: 1.5 });
+      pageCanvas.width = Math.round(vp.width);
+      pageCanvas.height = Math.round(vp.height);
+      await page.render({ canvasContext: pctx, viewport: vp }).promise;
+
+      const gx = pageCanvas.width * m, gy = pageCanvas.height * m;
+      const cw = (pageCanvas.width * (1 - 2 * m)) / cols;
+      const ch = (pageCanvas.height * (1 - 2 * m)) / rows;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          cctx.drawImage(pageCanvas, gx + c * cw, gy + r * ch, cw, ch, 0, 0, nx, ny);
+          const hu = extractGrayscaleCanvasToHU(cctx, nx, ny);
+          // Ignorar células completamente em branco/preto de páginas parciais
+          let minV = 9999, maxV = -9999;
+          for (let i = 0; i < hu.length; i += 17) {
+            if (hu[i] < minV) minV = hu[i];
+            if (hu[i] > maxV) maxV = hu[i];
+          }
+          if (maxV - minV > 120) slices.push(hu);
+        }
+      }
+      setImportProgress(true, `A extrair PDF pág. ${p}/${doc.numPages} (${slices.length} cortes)...`, (p / doc.numPages) * 100);
+    }
+
+    if (!slices.length) {
+      setImportProgress(false);
+      showToast('Não foram detetados cortes válidos nas células do PDF.');
+      return;
+    }
+
+    const nz = slices.length;
+    const data = new Int16Array(nx * ny * nz);
+    slices.forEach((s, idx) => data.set(s, idx * nx * ny));
+
+    const study = {
+      id: 'pdf_' + Date.now(),
+      name: `PDF → TAC (${nz} cortes)`,
+      data, nx, ny, nz,
+      spacing: [1.5, 1.5, zMm],
+      minHU: -1000, maxHU: 1550,
+      defaultWW: 2200, defaultWL: 250, defaultPreset: 'bone',
+      meta: { patient: state.importState.pdfFile.name.slice(0, 22), modality: 'PDF → 3D' }
+    };
+    setImportProgress(false);
+    $('importModal').classList.remove('open');
+    loadStudy(study);
+    showToast(`Volume 3D criado a partir de PDF (${nz} cortes)!`);
+  }
+
+  // =========================================================
+  // 8. EXPORTAÇÃO PNG & MODO CINE
+  // =========================================================
+  function exportPNG() {
+    render3DNow();
+    const out = document.createElement('canvas');
+    const ctx = out.getContext('2d');
+    if (state.layout === 'mpr3d') {
+      const w = 1280, h = 960;
+      out.width = w; out.height = h;
+      ctx.fillStyle = '#050a12'; ctx.fillRect(0, 0, w, h);
+      const cells = [
+        ['axial', 0, 0], ['coronal', w / 2, 0],
+        ['sagittal', 0, h / 2], ['vr3d', w / 2, h / 2]
+      ];
+      cells.forEach(([p, x, y]) => {
+        ctx.drawImage($('canvas-' + p), x, y, w / 2, h / 2);
+        const ov = $('overlay-' + p);
+        if (ov) ctx.drawImage(ov, x, y, w / 2, h / 2);
+      });
+    } else {
+      const p = state.layout === '3d' ? 'vr3d' : state.singlePlane;
+      const src = $('canvas-' + p);
+      out.width = src.width; out.height = src.height;
+      ctx.drawImage(src, 0, 0);
+      const ov = $('overlay-' + p);
+      if (ov) ctx.drawImage(ov, 0, 0);
+    }
+    const a = document.createElement('a');
+    a.download = `osiriweb3d_${Date.now()}.png`;
+    a.href = out.toDataURL('image/png');
+    a.click();
+    showToast('Captura PNG guardada!');
+  }
+
+  function toggleCine() {
+    const btn = $('btnCinePlay');
+    if (state.cine.playing) {
+      clearInterval(state.cine.timer);
+      state.cine.playing = false;
+      btn.textContent = '▶ Reproduzir Cine';
+      return;
+    }
+    state.cine.playing = true;
+    btn.textContent = '⏸ Pausar Cine';
+    const fps = clamp(parseInt($('cineFps').value, 10) || 10, 1, 30);
+    state.cine.timer = setInterval(() => {
+      const plane = state.activePlane === 'vr3d' ? 'axial' : state.activePlane;
+      const dim = getPlaneDims(plane);
+      state.slices[plane] = (state.slices[plane] + 1) % dim.d;
+      renderAll2D();
+    }, 1000 / fps);
+  }
+
+  // =========================================================
+  // 9. LIGAÇÕES DE EVENTOS E INICIALIZAÇÃO
+  // =========================================================
+  function bindUI() {
+    // Exame
+    $('studySelect').addEventListener('change', (e) => {
+      const id = e.target.value;
+      if (state.studies[id]) loadStudy(state.studies[id]);
+    });
+
+    // Layouts
+    $('layoutGroup').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-layout]');
+      if (btn) setLayout(btn.dataset.layout);
+    });
+    $('singlePlaneSelect').addEventListener('change', (e) => {
+      state.singlePlane = e.target.value;
+      setLayout('2d');
+    });
+
+    // Ferramentas
+    $('toolstrip').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tool]');
+      if (!btn) return;
+      state.tool = btn.dataset.tool;
+      document.querySelectorAll('#toolstrip [data-tool]').forEach(b => b.classList.toggle('active', b === btn));
+    });
+    $('btnClearMeas').addEventListener('click', () => {
+      state.measurements = { axial: [], coronal: [], sagittal: [] };
+      renderAll2D();
+      showToast('Medições limpas.');
+    });
+    $('btnResetViews').addEventListener('click', () => { resetViews(true); showToast('Vistas repostas.'); });
+    $('btnExportPNG').addEventListener('click', exportPNG);
+
+    // Inspetor mobile toggle
+    $('btnToggleInspector').addEventListener('click', () => $('inspector').classList.toggle('open'));
+
+    // Controlos 3D
+    $('vrModeGroup').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-vrmode]');
+      if (!c) return;
+      state.vr.mode = parseInt(c.dataset.vrmode, 10);
+      document.querySelectorAll('#vrModeGroup .chip').forEach(x => x.classList.toggle('active', x === c));
+      request3DRender();
+    });
+    $('vrPresetGroup').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-preset]');
+      if (c) apply3DPreset(c.dataset.preset);
+    });
+    $('vrThresh').addEventListener('input', (e) => {
+      state.vr.thresh = parseFloat(e.target.value);
+      $('val-vrThresh').textContent = state.vr.thresh.toFixed(2);
+      request3DRender();
+    });
+    $('vrGain').addEventListener('input', (e) => {
+      state.vr.gain = parseFloat(e.target.value);
+      $('val-vrGain').textContent = state.vr.gain.toFixed(2);
+      request3DRender();
+    });
+    $('vrZScale').addEventListener('input', (e) => {
+      state.vr.zScale = parseFloat(e.target.value);
+      $('val-vrZScale').textContent = state.vr.zScale.toFixed(2) + '×';
+      renderAll2D();
+      request3DRender();
+    });
+    ['clipX', 'clipY', 'clipZ'].forEach((id, idx) => {
+      $(id).addEventListener('input', (e) => {
+        state.vr.clip[idx] = parseFloat(e.target.value);
+        request3DRender();
+      });
+    });
+    $('btnAutoRotate').addEventListener('click', (e) => {
+      state.vr.autoRotate = !state.vr.autoRotate;
+      e.target.classList.toggle('active', state.vr.autoRotate);
+    });
+
+    // Controlos 2D W/L & CLUT
+    $('wlPresetGroup').addEventListener('click', (e) => {
+      const c = e.target.closest('.chip');
+      if (!c) return;
+      document.querySelectorAll('#wlPresetGroup .chip').forEach(x => x.classList.toggle('active', x === c));
+      if (c.id === 'btnAutoWL' && state.volume) {
+        state.ww = Math.max(100, state.volume.maxHU - state.volume.minHU);
+        state.wl = Math.round((state.volume.maxHU + state.volume.minHU) / 2);
+      } else if (c.dataset.ww) {
+        state.ww = parseFloat(c.dataset.ww);
+        state.wl = parseFloat(c.dataset.wl);
+      }
+      syncWLControls();
+      renderAll2D();
+    });
+    $('sliderWW').addEventListener('input', (e) => {
+      state.ww = parseFloat(e.target.value); $('val-ww').textContent = Math.round(state.ww); renderAll2D();
+    });
+    $('sliderWL').addEventListener('input', (e) => {
+      state.wl = parseFloat(e.target.value); $('val-wl').textContent = Math.round(state.wl); renderAll2D();
+    });
+    $('clut2dSelect').addEventListener('change', (e) => {
+      state.clut2d = e.target.value; buildCLUT(state.clut2d); renderAll2D();
+    });
+    $('chkCrosshairs').addEventListener('change', (e) => {
+      state.showCrosshairs = e.target.checked; renderAll2D();
+    });
+    $('btnCinePlay').addEventListener('click', toggleCine);
+
+    // Modais
+    const closeImport = () => $('importModal').classList.remove('open');
+    $('btnOpenImport').addEventListener('click', () => $('importModal').classList.add('open'));
+    $('btnCloseImport').addEventListener('click', closeImport);
+    $('btnCancelImport').addEventListener('click', closeImport);
+
+    const openAbout = () => $('aboutModal').classList.add('open');
+    const closeAbout = () => $('aboutModal').classList.remove('open');
+    $('btnAbout').addEventListener('click', openAbout);
+    $('btnAboutBrand').addEventListener('click', openAbout);
+    $('btnCloseAbout').addEventListener('click', closeAbout);
+    $('btnOkAbout').addEventListener('click', closeAbout);
+
+    // Tabs do Importador
+    $('importTabs').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      state.importState.activeTab = btn.dataset.tab;
+      document.querySelectorAll('#importTabs .tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + btn.dataset.tab));
+    });
+
+    // DICOM pickers
+    $('btnPickDicomFiles').addEventListener('click', () => $('inputDicomFiles').click());
+    $('btnPickDicomDir').addEventListener('click', () => $('inputDicomDir').click());
+    const onDicomPicked = (files) => {
+      state.importState.dicomFiles = [...files].filter(f => !f.name.startsWith('.'));
+      $('dicomFileCount').value = `${state.importState.dicomFiles.length} ficheiro(s)`;
+    };
+    $('inputDicomFiles').addEventListener('change', (e) => onDicomPicked(e.target.files));
+    $('inputDicomDir').addEventListener('change', (e) => onDicomPicked(e.target.files));
+
+    // Video picker & ROI preview
+    $('dz-video').addEventListener('click', () => $('inputVideoFile').click());
+    $('inputVideoFile').addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      state.importState.videoFile = f;
+      const vid = document.createElement('video');
+      vid.muted = true; vid.playsInline = true; vid.preload = 'auto';
+      vid.src = URL.createObjectURL(f);
+      vid.addEventListener('loadeddata', () => {
+        vid.currentTime = Math.min(0.2, vid.duration / 2);
+      });
+      vid.addEventListener('seeked', () => {
+        $('videoPreviewBox').style.display = 'flex';
+        drawCropOverlay($('videoPreviewCanvas'), vid, state.importState.videoCrop);
+      }, { once: true });
+      state.importState.videoEl = vid;
+    });
+    ['vidCropX', 'vidCropY', 'vidCropW', 'vidCropH'].forEach(id => {
+      $(id).addEventListener('input', () => {
+        state.importState.videoCrop = {
+          x: clamp(parseFloat($('vidCropX').value) / 100 || 0, 0, 0.8),
+          y: clamp(parseFloat($('vidCropY').value) / 100 || 0, 0, 0.8),
+          w: clamp(parseFloat($('vidCropW').value) / 100 || 0.8, 0.15, 1),
+          h: clamp(parseFloat($('vidCropH').value) / 100 || 0.8, 0.15, 1),
+        };
+        if (state.importState.videoEl) drawCropOverlay($('videoPreviewCanvas'), state.importState.videoEl, state.importState.videoCrop);
+      });
+    });
+
+    // Arrastar ROI diretamente no canvas de vídeo
+    let dragCrop = null;
+    const vpc = $('videoPreviewCanvas');
+    vpc.addEventListener('pointerdown', (e) => {
+      const r = vpc.getBoundingClientRect();
+      dragCrop = { x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height };
+      vpc.setPointerCapture(e.pointerId);
+    });
+    vpc.addEventListener('pointermove', (e) => {
+      if (!dragCrop || !state.importState.videoEl) return;
+      const r = vpc.getBoundingClientRect();
+      const x1 = clamp((e.clientX - r.left) / r.width, 0, 1);
+      const y1 = clamp((e.clientY - r.top) / r.height, 0, 1);
+      const x = Math.min(dragCrop.x0, x1), y = Math.min(dragCrop.y0, y1);
+      const w = Math.max(0.12, Math.abs(x1 - dragCrop.x0)), h = Math.max(0.12, Math.abs(y1 - dragCrop.y0));
+      state.importState.videoCrop = { x, y, w: Math.min(w, 1 - x), h: Math.min(h, 1 - y) };
+      $('vidCropX').value = Math.round(x * 100); $('vidCropY').value = Math.round(y * 100);
+      $('vidCropW').value = Math.round(state.importState.videoCrop.w * 100);
+      $('vidCropH').value = Math.round(state.importState.videoCrop.h * 100);
+      drawCropOverlay(vpc, state.importState.videoEl, state.importState.videoCrop);
+    });
+    vpc.addEventListener('pointerup', () => { dragCrop = null; });
+
+    // Sequência de Imagens picker
+    $('dz-images').addEventListener('click', () => $('inputImageFiles').click());
+    $('inputImageFiles').addEventListener('change', (e) => {
+      state.importState.imageFiles = [...e.target.files];
+      $('imgFileCount').value = `${state.importState.imageFiles.length} imagem(ns)`;
+      if (state.importState.imageFiles[0]) {
+        const im = new Image();
+        im.onload = () => {
+          $('imgPreviewBox').style.display = 'flex';
+          drawCropOverlay($('imgPreviewCanvas'), im, { x: 0, y: 0, w: 1, h: 1 });
+        };
+        im.src = URL.createObjectURL(state.importState.imageFiles[0]);
+      }
+    });
+
+    // PDF picker
+    $('dz-pdf').addEventListener('click', () => $('inputPdfFile').click());
+    $('inputPdfFile').addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      if (!window.pdfjsLib) { showToast('Biblioteca PDF.js ainda a carregar ou indisponível offline.'); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      state.importState.pdfFile = f;
+      const buf = await f.arrayBuffer();
+      const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      state.importState.pdfDoc = doc;
+      $('pdfPageCount').value = `${doc.numPages} página(s)`;
+      $('pdfPreviewBox').style.display = 'flex';
+      renderPdfPreview();
+    });
+    $('pdfGridPreset').addEventListener('change', renderPdfPreview);
+    $('pdfMargin').addEventListener('input', renderPdfPreview);
+
+    // Executar Importação
+    $('btnRunImport').addEventListener('click', () => {
+      const tab = state.importState.activeTab;
+      if (tab === 'dicom') importDicomPipeline();
+      else if (tab === 'video') importVideoPipeline();
+      else if (tab === 'images') importImagesPipeline();
+      else if (tab === 'pdf') importPdfPipeline();
+    });
+
+    // Resize responsivo
+    window.addEventListener('resize', () => { renderAll2D(); request3DRender(); });
+  }
+
+  // Registar Service Worker PWA
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+
+  // Arranque Principal
+  window.addEventListener('DOMContentLoaded', () => {
+    buildCLUT('gray');
+    bindUI();
+    setup2DViewportEvents('axial');
+    setup2DViewportEvents('coronal');
+    setup2DViewportEvents('sagittal');
+    setup3DViewportEvents();
+    initWebGL3D();
+
+    $('splashBar').style.width = '70%';
+    $('splashStatus').textContent = 'A sintetizar volumes anatómicos 3D de demonstração...';
+
+    setTimeout(() => {
+      const brain = generateBrainCT();
+      const thorax = generateThoraxCT();
+      state.studies[brain.id] = brain;
+      state.studies[thorax.id] = thorax;
+      loadStudy(brain);
+
+      $('splashBar').style.width = '100%';
+      $('splashStatus').textContent = 'Pronto!';
+      requestAnimationFrame(animationLoop);
+
+      setTimeout(() => $('splash').classList.add('hidden'), 320);
+    }, 120);
+  });
+})();
+</script>
+</body>
+</html>
